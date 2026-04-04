@@ -1,35 +1,42 @@
-name: Ejecutar y Guardar Prediccion
+name: Escaner de Apuestas 8h
 on:
-  workflow_dispatch: # Ejecución manual
+  workflow_dispatch:
   schedule:
-    - cron: '0 10 * * 5' # Se ejecuta solo cada viernes a las 10:00 AM
+    - cron: '0 */8 * * *'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # PERMISO CRÍTICO PARA GUARDAR ARCHIVOS
+      contents: write
     steps:
-      - name: Descargar codigo
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Configurar Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Instalar librerias
-        run: pip install numpy scipy requests
+      - name: Install Deps
+        run: pip install numpy scipy requests Pillow
 
-      - name: Ejecutar modelo y generar CSV
+      - name: Run Model
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python main.py
 
-      - name: Guardar cambios en el repositorio
+      - name: Send Telegram Image
+        run: |
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
+            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+            -F photo=@prediction_card.png \
+            -F caption="🏆 Top Pick Liga MX (MXN) 🏆"
+
+      - name: Save History
         run: |
           git config --global user.name "PredictorBot"
           git config --global user.email "bot@github.com"
           git add predictions_history.csv
-          git commit -m "Update predictions [skip ci]" || echo "No hay cambios para guardar"
+          git commit -m "Update history [skip ci]" || echo "No changes"
           git push
