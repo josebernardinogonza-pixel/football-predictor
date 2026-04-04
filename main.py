@@ -165,22 +165,30 @@ if __name__ == "__main__":
     
     resultados_jornada = []
     for h, a in jornada:
-        print(f"Analizando: {h} vs {a}...")
         res = predict_match(h, a)
         save_to_csv(res)
         resultados_jornada.append(res)
     
-    # Mostrar Top 3 en consola
     top_picks = sorted(resultados_jornada, key=lambda x: x['ev'], reverse=True)
     
-    print("\n" + "="*45)
-    print("🏆 TOP APUESTAS SUGERIDAS (MXN) 🏆")
-    print("="*45)
+    # --- GENERAR MENSAJE PARA TELEGRAM ---
+    mensaje_tg = f"🏆 TOP APUESTAS {LEAGUE_TO_SCAN} 🏆\n\n"
+    hay_apuestas = False
+    
     for i, p in enumerate(top_picks[:3], 1):
         if p['ev'] > 0:
-            print(f"{i}. {p['local']} vs {p['visitante']}")
-            print(f"   Valor (EV): {p['ev']:+.2f} | Cuota: {p['cuota']}")
-            print(f"   💰 APUESTA: ${p['apuesta']} MXN")
-            print("-" * 35)
+            hay_apuestas = True
+            mensaje_tg += f"{i}. {p['local']} vs {p['visitante']}\n"
+            mensaje_tg += f"   📈 Prob: {p['prob_l']:.1%}\n"
+            mensaje_tg += f"   💎 EV: {p['ev']:+.2f} | Cuota: {p['cuota']}\n"
+            mensaje_tg += f"   💵 APUESTA: ${p['apuesta']} MXN\n"
+            mensaje_tg += "--------------------------\n"
     
-    print("\n✅ Proceso finalizado. Historial actualizado en GitHub.")
+    if not hay_apuestas:
+        mensaje_tg += "No se encontraron apuestas con valor positivo hoy. ❌"
+
+    # Guardamos el mensaje en un archivo temporal para que GitHub lo lea
+    with open("telegram_msg.txt", "w", encoding="utf-8") as f:
+        f.write(mensaje_tg)
+    
+    print("\n✅ Análisis completado y mensaje generado.")
