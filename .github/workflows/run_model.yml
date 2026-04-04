@@ -1,10 +1,14 @@
-name: Ejecutar Prediccion
+name: Ejecutar y Guardar Prediccion
 on:
-  workflow_dispatch: # Permite ejecutarlo manualmente con un botón
+  workflow_dispatch: # Ejecución manual
+  schedule:
+    - cron: '0 10 * * 5' # Se ejecuta solo cada viernes a las 10:00 AM
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # PERMISO CRÍTICO PARA GUARDAR ARCHIVOS
     steps:
       - name: Descargar codigo
         uses: actions/checkout@v3
@@ -15,10 +19,17 @@ jobs:
           python-version: '3.9'
 
       - name: Instalar librerias
-        run: |
-          pip install numpy scipy requests
+        run: pip install numpy scipy requests
 
-      - name: Ejecutar modelo
+      - name: Ejecutar modelo y generar CSV
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python main.py
+
+      - name: Guardar cambios en el repositorio
+        run: |
+          git config --global user.name "PredictorBot"
+          git config --global user.email "bot@github.com"
+          git add predictions_history.csv
+          git commit -m "Update predictions [skip ci]" || echo "No hay cambios para guardar"
+          git push
