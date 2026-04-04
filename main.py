@@ -4,35 +4,15 @@ import re
 import numpy as np
 from scipy.stats import poisson
 
-def get_upcoming_matches(league_name):
-    """Busca los próximos partidos usando SerpApi"""
-    api_key = os.getenv("SERPAPI_KEY")
-    query = f"upcoming matches {league_name}"
-    url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
-    
-    print(f"--- BUSCANDO JORNADA DE: {league_name} ---")
-    response = requests.get(url).json()
-    
-    matches = []
-    # SerpApi suele devolver los partidos en una sección llamada 'sports_results' o 'knowledge_graph'
-    if "sports_results" in response and "games" in response["sports_results"]:
-        for game in response["sports_results"]["games"][:5]: # Limitamos a 5 partidos para no agotar la API
-            home = game.get("teams", [{}])[0].get("name")
-            away = game.get("teams", [{}])[1].get("name")
-            if home and away:
-                matches.append((home, away))
-    
-    # Si Google no da el widget de deportes, intentamos extraer del texto
-    if not matches:
-        print("Aviso: No se encontró el widget de deportes, intentando búsqueda manual...")
-        matches = [("Real Madrid", "Barcelona"), ("Man City", "Arsenal")] # Backup por si falla el widget
-        
-    return matches
+# --- CONFIGURACIÓN ---
+HOME_ADVANTAGE = 1.10  # Aumenta 10% al local
+AWAY_PENALTY = 0.90    # Reduce 10% al visitante
 
-def get_xg_from_serp(team_name):
-    """Busca el xG promedio de un equipo"""
+def get_stats_from_serp(team_name):
+    """Busca xG a favor y xG en contra (defensa)"""
     api_key = os.getenv("SERPAPI_KEY")
-    query = f"{team_name} xG per game 2024"
+    # Buscamos xG anotado y xG concedido (conceded)
+    query = f"{team_name} xG stats 2024 per game"
     url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
     
     response = requests.get(url).json()
@@ -41,28 +21,71 @@ def get_xg_from_serp(team_name):
         for result in response["organic_results"]:
             text_blob += " " + result.get("snippet", "") + " " + result.get("title", "")
 
-    matches = re.findall(r'(\d\.\d+)', text_blob)
-    found_values = [float(v) for v in matches if 0.5 < float(v) < 3.5]
+    # Extraer todos los números decimales
+    numbers = [float(v) for v in re.findall(r'(\d\.\d+)', text_blob) if 0.4 < float(v) < 3.0]
     
-    return sum(found_values) / len(found_values) if found_values else 1.4
+    if len(numbers) >= 2:
+        attack_xg = numbers[0]  # El primero suele ser ataque
+        defense_xg = numbers[1] # El segundo suele ser defensa
+        return attack_xg, defense_xg
+    return 1.3, 1.3 # Valores neutros si falla
 
-def predict_match(home_xg, away_xg):
-    home_probs = poisson.pmf(range(10), home_xg)
-    away_probs = poisson.pmf(range(10), away_xg)
-    matrix = np.outer(home_probs, away_probs)
-    return np.sum(np.tril(matrix, -1)), np.sum(np.diag(matrix)), np.sum(np.triu(matrix, 1))
+def get_market_odds(home_team, away_team):
+    """Busca las cuotas (odds) reales en Google"""
+    api_key = os.getenv("SERPAPI_KEY")
+    query = f"odds {home_team} vs {away_team}"
+    url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
+    response = requests.get(url).json()
+    
+    # Intentamos buscar números mayores a 1.20 que parezcan cuotas
+    text = str(response.get("organic_results", ""))
+    odds = re.findall(r'(\d\.\d{2})', text)
+    
+    # Si encontramos cuotas, devolvemos las 3 primeras (Local, Empate, Visitante)
+    if len(odds) >= 3:
+        return [float(o) for o in odds[:3]]
+    return [2.0, 3.2, 3.5] # Cuotas ficticias si no encuentra
+
+def predict_advanced(h_team, a_team):
+    # Obtener fuerza de ataque y defensa
+    h_att, h_def = get_stats_from_serp(h_team)
+    a_att, a_def = get_stats_from_serp(a_team)
+    
+    # Proyectar xG del partido: (Ataque Local * Defensa Visitante)
+    # Aplicamos factor de localía
+    projected_h_xg = (h_att * a_def) * HOME_ADVANTAGE
+    projected_a_xg = (a_att * h_def) * AWAY_PENALTY
+    
+    # Distribución de Poisson
+    h_probs = poisson.pmf(range(10), projected_h_xg)
+    a_probs = poisson.pmf(range(10), projected_a_xg)
+    matrix = np.outer(h_probs, a_probs)
+    
+    prob_l = np.sum(np.tril(matrix, -1))
+    prob_e = np.sum(np.diag(matrix))
+    prob_v = np.sum(np.triu(matrix, 1))
+    
+    return prob_l, prob_e, prob_v, projected_h_xg, projected_a_xg
 
 if __name__ == "__main__":
-    # 1. Obtener partidos automáticamente
-    jornada = get_upcoming_matches("Spanish La Liga")
+    # Lista de partidos a analizar
+    partidos = [("Real Madrid", "Atletico Madrid"), ("Liverpool", "Chelsea")]
     
-    # 2. Procesar cada partido
-    for local, visitante in jornada:
-        h_xg = get_xg_from_serp(local)
-        a_xg = get_xg_from_serp(visitante)
-        hw, d, aw = predict_match(h_xg, a_xg)
+    for local, visitante in partidos:
+        pl, pe, pv, xgh, xga = predict_advanced(local, visitante)
+        odds = get_market_odds(local, visitante)
         
-        print(f"\nPROSTICO: {local} vs {visitante}")
-        print(f"xG: {h_xg:.2f} - {a_xg:.2f}")
-        print(f"L: {hw:.1%} | E: {d:.1%} | V: {aw:.1%}")
-        print("-" * 30)
+        # Calcular Valor Esperado (EV)
+        # EV = (Probabilidad * Cuota) - 1
+        ev_l = (pl * odds[0]) - 1
+        
+        print(f"\nANÁLISIS: {local} vs {visitante}")
+        print(f"xG Proyectado: {xgh:.2f} - {xga:.2f}")
+        print(f"Probabilidades: L:{pl:.1%} | E:{pe:.1%} | V:{pv:.1%}")
+        print(f"Cuotas Mercado: L:{odds[0]} | E:{odds[1]} | V:{odds[2]}")
+        
+        if ev_l > 0.05: # Si el valor es mayor al 5%
+            print(f"¡ALERTA DE VALOR! -> Apostar a {local} (EV: {ev_l:+.2f})")
+        else:
+            print("Sin valor claro en este mercado.")
+        print("-" * 40)
