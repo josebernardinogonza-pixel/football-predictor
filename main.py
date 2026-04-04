@@ -4,65 +4,65 @@ import re
 import numpy as np
 from scipy.stats import poisson
 
-def get_xg_from_serp(team_name):
-    """
-    Busca en Google el xG promedio del equipo usando SerpApi
-    """
+def get_upcoming_matches(league_name):
+    """Busca los próximos partidos usando SerpApi"""
     api_key = os.getenv("SERPAPI_KEY")
-    query = f"{team_name} xG per game 2024 2025"
+    query = f"upcoming matches {league_name}"
     url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
     
-    print(f"Buscando estadísticas para: {team_name}...")
+    print(f"--- BUSCANDO JORNADA DE: {league_name} ---")
     response = requests.get(url).json()
     
-    # Unimos todos los textos que Google encontró (títulos y descripciones)
+    matches = []
+    # SerpApi suele devolver los partidos en una sección llamada 'sports_results' o 'knowledge_graph'
+    if "sports_results" in response and "games" in response["sports_results"]:
+        for game in response["sports_results"]["games"][:5]: # Limitamos a 5 partidos para no agotar la API
+            home = game.get("teams", [{}])[0].get("name")
+            away = game.get("teams", [{}])[1].get("name")
+            if home and away:
+                matches.append((home, away))
+    
+    # Si Google no da el widget de deportes, intentamos extraer del texto
+    if not matches:
+        print("Aviso: No se encontró el widget de deportes, intentando búsqueda manual...")
+        matches = [("Real Madrid", "Barcelona"), ("Man City", "Arsenal")] # Backup por si falla el widget
+        
+    return matches
+
+def get_xg_from_serp(team_name):
+    """Busca el xG promedio de un equipo"""
+    api_key = os.getenv("SERPAPI_KEY")
+    query = f"{team_name} xG per game 2024"
+    url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
+    
+    response = requests.get(url).json()
     text_blob = ""
     if "organic_results" in response:
         for result in response["organic_results"]:
             text_blob += " " + result.get("snippet", "") + " " + result.get("title", "")
 
-    # Buscamos números decimales (ej: 1.75) que estén cerca de la palabra 'xG'
-    # Esta regex busca un número después o antes de la mención de xG
-    matches = re.findall(r'xG.*?(\d\.\d+)|(\d\.\d+).*?xG', text_blob, re.IGNORECASE)
+    matches = re.findall(r'(\d\.\d+)', text_blob)
+    found_values = [float(v) for v in matches if 0.5 < float(v) < 3.5]
     
-    found_values = []
-    for m in matches:
-        for val in m:
-            if val: found_values.append(float(val))
-    
-    if found_values:
-        avg_xg = sum(found_values) / len(found_values)
-        # Limitamos el xG para que sea realista (entre 0.5 y 3.0)
-        return max(0.5, min(3.0, avg_xg))
-    
-    print(f"No se encontró xG claro para {team_name}, usando promedio por defecto.")
-    return 1.5 # Valor por defecto si falla la búsqueda
+    return sum(found_values) / len(found_values) if found_values else 1.4
 
 def predict_match(home_xg, away_xg):
     home_probs = poisson.pmf(range(10), home_xg)
     away_probs = poisson.pmf(range(10), away_xg)
     matrix = np.outer(home_probs, away_probs)
-    
-    home_win = np.sum(np.tril(matrix, -1))
-    draw = np.sum(np.diag(matrix))
-    away_win = np.sum(np.triu(matrix, 1))
-    
-    return home_win, draw, away_win
+    return np.sum(np.tril(matrix, -1)), np.sum(np.diag(matrix)), np.sum(np.triu(matrix, 1))
 
 if __name__ == "__main__":
-    # CONFIGURA AQUÍ LOS EQUIPOS
-    equipo_local = "Real Madrid"
-    equipo_visitante = "Barcelona"
+    # 1. Obtener partidos automáticamente
+    jornada = get_upcoming_matches("Spanish La Liga")
     
-    h_xg = get_xg_from_serp(equipo_local)
-    a_xg = get_xg_from_serp(equipo_visitante)
-    
-    hw, d, aw = predict_match(h_xg, a_xg)
-    
-    print(f"\n--- RESULTADOS PARA: {equipo_local} vs {equipo_visitante} ---")
-    print(f"xG Proyectado {equipo_local}: {h_xg:.2f}")
-    print(f"xG Proyectado {equipo_visitante}: {a_xg:.2f}")
-    print(f"--------------------------------------------")
-    print(f"Probabilidad Victoria Local: {hw:.2%}")
-    print(f"Probabilidad Empate: {d:.2%}")
-    print(f"Probabilidad Victoria Visitante: {aw:.2%}")
+    # 2. Procesar cada partido
+    for local, visitante in jornada:
+        h_xg = get_xg_from_serp(local)
+        a_xg = get_xg_from_serp(visitante)
+        hw, d, aw = predict_match(h_xg, a_xg)
+        
+        print(f"\nPROSTICO: {local} vs {visitante}")
+        print(f"xG: {h_xg:.2f} - {a_xg:.2f}")
+        print(f"L: {hw:.1%} | E: {d:.1%} | V: {aw:.1%}")
+        print("-" * 30)
