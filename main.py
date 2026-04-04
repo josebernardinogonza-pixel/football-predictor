@@ -3,192 +3,132 @@ import requests
 import re
 import numpy as np
 from scipy.stats import poisson
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
 import csv
 from datetime import datetime
 
-# ==========================================
-# CONFIGURACIÓN GLOBAL (AJUSTA A TU GUSTO)
-# ==========================================
-BANKROLL_MXN = 5000.00  # Tu presupuesto total en Pesos Mexicanos
-KELLY_FRACTION = 0.25   # Riesgo conservador (25% de lo sugerido)
-HOME_ADVANTAGE = 1.10   # +10% al local
-AWAY_PENALTY = 0.90     # -10% al visitante
-NEWS_PENALTY = 0.85     # -15% al ataque si hay bajas importantes
-LEAGUE_TO_SCAN = "Liga MX" # Puedes cambiar a "Premier League", etc.
-
-# ==========================================
-# FUNCIONES DE OBTENCIÓN DE DATOS (SERPAPI)
-# ==========================================
-
-def get_upcoming_matches(league):
-    """Busca los próximos partidos de la jornada"""
-    api_key = os.getenv("SERPAPI_KEY")
-    query = f"proximos partidos {league}"
-    url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
-    
-    try:
-        response = requests.get(url).json()
-        matches = []
-        if "sports_results" in response and "games" in response["sports_results"]:
-            for game in response["sports_results"]["games"]:
-                if game.get("status") != "Final":
-                    home = game["teams"][0]["name"]
-                    away = game["teams"][1]["name"]
-                    matches.append((home, away))
-        
-        # Backup si falla el widget de Google
-        if not matches:
-            matches = [("Club America", "Chivas"), ("Cruz Azul", "Pumas"), ("Tigres", "Monterrey")]
-        return matches[:6] # Analizar 6 partidos para cuidar créditos de API
-    except:
-        return [("Club America", "Chivas")]
+# --- CONFIGURACIÓN ---
+BANKROLL_MXN = 5000.00
+KELLY_FRACTION = 0.25
+HOME_ADVANTAGE = 1.10
+AWAY_PENALTY = 0.90
+NEWS_PENALTY = 0.85
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
 def get_stats_from_serp(team_name):
     """Obtiene xG de ataque y defensa"""
-    api_key = os.getenv("SERPAPI_KEY")
     query = f"{team_name} xG stats 2024 per game"
-    url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
-    
+    url = f"https://serpapi.com/search.json?q={query}&api_key={SERPAPI_KEY}"
     try:
-        response = requests.get(url).json()
-        text = str(response.get("organic_results", ""))
-        numbers = [float(v) for v in re.findall(r'(\d\.\d+)', text) if 0.4 < float(v) < 3.5]
-        if len(numbers) >= 2:
-            return numbers[0], numbers[1]
-        return 1.4, 1.4 # Valores neutros por defecto
-    except:
-        return 1.4, 1.4
+        res = requests.get(url).json()
+        text = str(res.get("organic_results", ""))
+        nums = [float(v) for v in re.findall(r'(\d\.\d+)', text) if 0.4 < float(v) < 3.5]
+        return (nums[0], nums[1]) if len(nums) >= 2 else (1.4, 1.4)
+    except: return 1.4, 1.4
 
 def get_news_impact(team_name):
-    """Analiza noticias de lesiones en tiempo real"""
-    api_key = os.getenv("SERPAPI_KEY")
-    query = f"{team_name} team news injuries out"
-    url = f"https://serpapi.com/search.json?engine=google_news&q={query}&api_key={api_key}"
-    
+    """Analiza noticias de lesiones"""
+    query = f"{team_name} team news injuries"
+    url = f"https://serpapi.com/search.json?engine=google_news&q={query}&api_key={SERPAPI_KEY}"
     try:
-        response = requests.get(url).json()
-        bad_news_keywords = ["injury", "out for", "suspended", "doubtful", "missing", "absent", "baja"]
-        news_count = 0
-        if "news_results" in response:
-            for article in response["news_results"][:5]:
-                text = (article.get("title", "") + article.get("snippet", "")).lower()
-                if any(word in text for word in bad_news_keywords):
-                    news_count += 1
-        return NEWS_PENALTY if news_count >= 2 else 1.0
-    except:
-        return 1.0
+        res = requests.get(url).json()
+        keywords = ["injury", "out", "suspended", "baja", "lesion"]
+        count = 0
+        for art in res.get("news_results", [])[:5]:
+            text = (art.get("title", "") + art.get("snippet", "")).lower()
+            if any(w in text for w in keywords): count += 1
+        return NEWS_PENALTY if count >= 2 else 1.0
+    except: return 1.0
 
 def get_market_odds(home, away):
-    """Busca cuotas reales en Google"""
-    api_key = os.getenv("SERPAPI_KEY")
+    """Busca cuotas reales"""
     query = f"odds {home} vs {away}"
-    url = f"https://serpapi.com/search.json?q={query}&api_key={api_key}"
-    
+    url = f"https://serpapi.com/search.json?q={query}&api_key={SERPAPI_KEY}"
     try:
-        response = requests.get(url).json()
-        text = str(response.get("organic_results", ""))
+        res = requests.get(url).json()
+        text = str(res.get("organic_results", ""))
         odds = re.findall(r'(\d\.\d{2})', text)
-        if len(odds) >= 3:
-            return [float(o) for o in odds[:3]]
-        return [2.10, 3.20, 3.40] # Cuotas base si no encuentra
-    except:
-        return [2.00, 3.00, 3.50]
+        return [float(o) for o in odds[:3]] if len(odds) >= 3 else [2.10, 3.20, 3.40]
+    except: return [2.00, 3.00, 3.50]
 
-# ==========================================
-# NÚCLEO MATEMÁTICO Y FINANCIERO
-# ==========================================
-
-def predict_match(home, away):
-    """Pipeline completo de predicción para un partido"""
-    # 1. Obtener Datos
-    h_att, h_def = get_stats_from_serp(home)
-    a_att, a_def = get_stats_from_serp(away)
-    h_mod = get_news_impact(home)
-    a_mod = get_news_impact(away)
-    
-    # 2. xG Proyectado Ajustado
-    final_h_xg = (h_att * a_def) * HOME_ADVANTAGE * h_mod
-    final_a_xg = (a_att * h_def) * AWAY_PENALTY * a_mod
-    
-    # 3. Poisson
-    h_probs = poisson.pmf(range(10), final_h_xg)
-    a_probs = poisson.pmf(range(10), final_a_xg)
-    matrix = np.outer(h_probs, a_probs)
-    
-    prob_l = np.sum(np.tril(matrix, -1))
-    prob_e = np.sum(np.diag(matrix))
-    prob_v = np.sum(np.triu(matrix, 1))
-    
-    # 4. Cuotas y Valor (EV)
-    odds = get_market_odds(home, away)
-    cuota_l = odds[0]
-    ev_l = (prob_l * cuota_l) - 1
-    
-    # 5. Kelly Criterion en MXN
-    apuesta_mxn = 0
-    if ev_l > 0:
-        f_star = ((cuota_l - 1) * prob_l - (1 - prob_l)) / (cuota_l - 1)
-        apuesta_mxn = round(f_star * KELLY_FRACTION * BANKROLL_MXN, 2)
-        
-    return {
-        "local": home, "visitante": away,
-        "prob_l": prob_l, "prob_e": prob_e, "prob_v": prob_v,
-        "xgh": final_h_xg, "xga": final_a_xg,
-        "cuota": cuota_l, "ev": ev_l, "apuesta": max(0, apuesta_mxn)
-    }
-
-def save_to_csv(res):
-    """Guarda el resultado en el historial CSV"""
-    file_name = "predictions_history.csv"
-    file_exists = os.path.isfile(file_name)
+def save_to_csv(data):
+    """Guarda resultados en historial"""
+    file = "predictions_history.csv"
+    exists = os.path.isfile(file)
     fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
-    
-    with open(file_name, mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(["Fecha", "Partido", "Prob_L", "Prob_E", "Prob_V", "xG_H", "xG_A", "Cuota", "EV", "Apuesta_MXN"])
-        
-        writer.writerow([
-            fecha, f"{res['local']} vs {res['visitante']}",
-            f"{res['prob_l']:.1%}", f"{res['prob_e']:.1%}", f"{res['prob_v']:.1%}",
-            f"{res['xgh']:.2f}", f"{res['xga']:.2f}",
-            res['cuota'], f"{res['ev']:+.2f}", f"${res['apuesta']} MXN"
-        ])
+    with open(file, 'a', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        if not exists:
+            w.writerow(["Fecha", "Partido", "Prob_L", "Cuota", "EV", "Apuesta_MXN"])
+        w.writerow([fecha, f"{data['home']} vs {data['away']}", f"{data['prob_l']:.1%}", data['cuota'], f"{data['ev']:+.2f}", f"${data['apuesta']} MXN"])
 
-# ==========================================
-# EJECUCIÓN PRINCIPAL
-# ==========================================
+def generate_card(data):
+    """Crea la imagen para Telegram"""
+    img = Image.new('RGB', (800, 450), color=(15, 15, 15))
+    draw = ImageDraw.Draw(img)
+    
+    # Descargar logos
+    def load_logo(url):
+        try:
+            r = requests.get(url)
+            return Image.open(BytesIO(r.content)).convert("RGBA").resize((130, 130))
+        except: return Image.new('RGBA', (130, 130), color=(40, 40, 40))
+
+    logo_h = load_logo(data['home_logo'])
+    logo_a = load_logo(data['away_logo'])
+    img.paste(logo_h, (80, 100), logo_h)
+    img.paste(logo_a, (590, 100), logo_a)
+
+    # Textos
+    draw.text((400, 40), "PRONÓSTICO LIGA MX", fill="gold", anchor="mm")
+    draw.text((145, 250), data['home'][:12], fill="white", anchor="mm")
+    draw.text((655, 250), data['away'][:12], fill="white", anchor="mm")
+    
+    # Probabilidades
+    draw.text((400, 150), f"{data['prob_l']:.1%}", fill="#00FF00", anchor="mm")
+    draw.text((400, 180), "Prob. Victoria Local", fill="gray", anchor="mm")
+    
+    # Cuadro Apuesta
+    draw.rectangle([150, 300, 650, 410], outline="gold", width=2)
+    draw.text((400, 335), f"APUESTA: ${data['apuesta']} MXN", fill="gold", anchor="mm")
+    draw.text((400, 375), f"Cuota: {data['cuota']} | EV: {data['ev']:+.2f}", fill="white", anchor="mm")
+    
+    img.save("prediction_card.png")
 
 if __name__ == "__main__":
-    print(f"--- ESCÁNER PROFESIONAL: {LEAGUE_TO_SCAN} ---")
-    jornada = get_upcoming_matches(LEAGUE_TO_SCAN)
+    # 1. Obtener partidos
+    url = f"https://serpapi.com/search.json?q=proximos+partidos+Liga+MX&api_key={SERPAPI_KEY}"
+    res = requests.get(url).json()
+    matches = res.get("sports_results", {}).get("games", [])[:5]
     
-    resultados_jornada = []
-    for h, a in jornada:
-        res = predict_match(h, a)
-        save_to_csv(res)
-        resultados_jornada.append(res)
-    
-    top_picks = sorted(resultados_jornada, key=lambda x: x['ev'], reverse=True)
-    
-    # --- GENERAR MENSAJE PARA TELEGRAM ---
-    mensaje_tg = f"🏆 TOP APUESTAS {LEAGUE_TO_SCAN} 🏆\n\n"
-    hay_apuestas = False
-    
-    for i, p in enumerate(top_picks[:3], 1):
-        if p['ev'] > 0:
-            hay_apuestas = True
-            mensaje_tg += f"{i}. {p['local']} vs {p['visitante']}\n"
-            mensaje_tg += f"   📈 Prob: {p['prob_l']:.1%}\n"
-            mensaje_tg += f"   💎 EV: {p['ev']:+.2f} | Cuota: {p['cuota']}\n"
-            mensaje_tg += f"   💵 APUESTA: ${p['apuesta']} MXN\n"
-            mensaje_tg += "--------------------------\n"
-    
-    if not hay_apuestas:
-        mensaje_tg += "No se encontraron apuestas con valor positivo hoy. ❌"
+    results = []
+    for m in matches:
+        h_name = m["teams"][0]["name"]
+        a_name = m["teams"][1]["name"]
+        h_logo = m["teams"][0].get("thumbnail")
+        a_logo = m["teams"][1].get("thumbnail")
+        
+        # Lógica Poisson
+        h_att, h_def = get_stats_from_serp(h_name)
+        a_att, a_def = get_stats_from_serp(a_name)
+        h_xg = (h_att * a_def) * HOME_ADVANTAGE * get_news_impact(h_name)
+        a_xg = (a_att * h_def) * AWAY_PENALTY * get_news_impact(a_name)
+        
+        prob_l = np.sum(np.tril(np.outer(poisson.pmf(range(10), h_xg), poisson.pmf(range(10), a_xg)), -1))
+        odds = get_market_odds(h_name, a_name)
+        ev = (prob_l * odds[0]) - 1
+        
+        apuesta = 0
+        if ev > 0:
+            f = ((odds[0]-1)*prob_l - (1-prob_l))/(odds[0]-1)
+            apuesta = round(f * KELLY_FRACTION * BANKROLL_MXN, 2)
+        
+        data = {"home": h_name, "away": a_name, "home_logo": h_logo, "away_logo": a_logo, "prob_l": prob_l, "cuota": odds[0], "ev": ev, "apuesta": max(0, apuesta)}
+        save_to_csv(data)
+        results.append(data)
 
-    # Guardamos el mensaje en un archivo temporal para que GitHub lo lea
-    with open("telegram_msg.txt", "w", encoding="utf-8") as f:
-        f.write(mensaje_tg)
-    
-    print("\n✅ Análisis completado y mensaje generado.")
+    # Generar imagen del mejor pick
+    if results:
+        best = max(results, key=lambda x: x['ev'])
+        generate_card(best)
