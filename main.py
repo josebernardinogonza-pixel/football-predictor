@@ -10,125 +10,94 @@ from datetime import datetime
 
 # --- CONFIGURACIÓN ---
 BANKROLL_MXN = 5000.00
-KELLY_FRACTION = 0.25
-HOME_ADVANTAGE = 1.10
-AWAY_PENALTY = 0.90
-NEWS_PENALTY = 0.85
+KELLY_FRACTION = 0.20 # Bajamos a 0.20 para ser más conservadores
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
-def get_stats_from_serp(team_name):
-    """Obtiene xG de ataque y defensa"""
-    query = f"{team_name} xG stats 2024 per game"
-    url = f"https://serpapi.com/search.json?q={query}&api_key={SERPAPI_KEY}"
+def get_stats(team):
+    """Obtiene xG Ataque/Defensa con manejo de errores"""
+    url = f"https://serpapi.com/search.json?q={team}+xG+stats+2024&api_key={SERPAPI_KEY}"
     try:
         res = requests.get(url).json()
-        text = str(res.get("organic_results", ""))
-        nums = [float(v) for v in re.findall(r'(\d\.\d+)', text) if 0.4 < float(v) < 3.5]
-        return (nums[0], nums[1]) if len(nums) >= 2 else (1.4, 1.4)
-    except: return 1.4, 1.4
+        snippets = " ".join([r.get("snippet", "") for r in res.get("organic_results", [])[:3]])
+        nums = [float(v) for v in re.findall(r'(\d\.\d+)', snippets) if 0.5 < float(v) < 3.0]
+        return (nums[0], nums[1]) if len(nums) >= 2 else (1.4, 1.3)
+    except: return 1.4, 1.3
 
-def get_news_impact(team_name):
-    """Analiza noticias de lesiones"""
-    query = f"{team_name} team news injuries"
-    url = f"https://serpapi.com/search.json?engine=google_news&q={query}&api_key={SERPAPI_KEY}"
+def get_news(team):
+    """Analiza bajas de última hora"""
+    url = f"https://serpapi.com/search.json?engine=google_news&q={team}+injuries+bajas&api_key={SERPAPI_KEY}"
     try:
         res = requests.get(url).json()
-        keywords = ["injury", "out", "suspended", "baja", "lesion"]
         count = 0
         for art in res.get("news_results", [])[:5]:
-            text = (art.get("title", "") + art.get("snippet", "")).lower()
-            if any(w in text for w in keywords): count += 1
-        return NEWS_PENALTY if count >= 2 else 1.0
+            if any(w in art.get("title", "").lower() for w in ["injury", "out", "baja", "lesion"]): count += 1
+        return 0.85 if count >= 2 else 1.0
     except: return 1.0
 
-def get_market_odds(home, away):
-    """Busca cuotas reales"""
-    query = f"odds {home} vs {away}"
-    url = f"https://serpapi.com/search.json?q={query}&api_key={SERPAPI_KEY}"
-    try:
-        res = requests.get(url).json()
-        text = str(res.get("organic_results", ""))
-        odds = re.findall(r'(\d\.\d{2})', text)
-        return [float(o) for o in odds[:3]] if len(odds) >= 3 else [2.10, 3.20, 3.40]
-    except: return [2.00, 3.00, 3.50]
-
-def save_to_csv(data):
-    """Guarda resultados en historial"""
-    file = "predictions_history.csv"
-    exists = os.path.isfile(file)
-    fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
-    with open(file, 'a', newline='', encoding='utf-8') as f:
-        w = csv.writer(f)
-        if not exists:
-            w.writerow(["Fecha", "Partido", "Prob_L", "Cuota", "EV", "Apuesta_MXN"])
-        w.writerow([fecha, f"{data['home']} vs {data['away']}", f"{data['prob_l']:.1%}", data['cuota'], f"{data['ev']:+.2f}", f"${data['apuesta']} MXN"])
-
 def generate_card(data):
-    """Crea la imagen para Telegram"""
-    img = Image.new('RGB', (800, 450), color=(15, 15, 15))
+    """Genera la imagen para Telegram"""
+    img = Image.new('RGB', (800, 450), color=(10, 10, 10))
     draw = ImageDraw.Draw(img)
     
-    # Descargar logos
-    def load_logo(url):
+    # Cargar Logos
+    def load_img(url):
         try:
-            r = requests.get(url)
-            return Image.open(BytesIO(r.content)).convert("RGBA").resize((130, 130))
-        except: return Image.new('RGBA', (130, 130), color=(40, 40, 40))
+            r = requests.get(url, timeout=5)
+            return Image.open(BytesIO(r.content)).convert("RGBA").resize((140, 140))
+        except: return Image.new('RGBA', (140, 140), color=(40, 40, 40))
 
-    logo_h = load_logo(data['home_logo'])
-    logo_a = load_logo(data['away_logo'])
-    img.paste(logo_h, (80, 100), logo_h)
-    img.paste(logo_a, (590, 100), logo_a)
+    img.paste(load_img(data['h_logo']), (70, 100), load_img(data['h_logo']))
+    img.paste(load_img(data['a_logo']), (590, 100), load_img(data['a_logo']))
 
-    # Textos
-    draw.text((400, 40), "PRONÓSTICO LIGA MX", fill="gold", anchor="mm")
-    draw.text((145, 250), data['home'][:12], fill="white", anchor="mm")
-    draw.text((655, 250), data['away'][:12], fill="white", anchor="mm")
+    # Textos (Sin fuentes externas para evitar errores en GitHub Actions)
+    draw.text((400, 40), "TOP PICK LIGA MX", fill="gold", anchor="mm")
+    draw.text((140, 260), data['home'][:12], fill="white", anchor="mm")
+    draw.text((660, 260), data['away'][:12], fill="white", anchor="mm")
+    draw.text((400, 160), f"{data['prob']:.1%}", fill="#00FF00", anchor="mm")
+    draw.text((400, 190), "Prob. Victoria", fill="gray", anchor="mm")
     
-    # Probabilidades
-    draw.text((400, 150), f"{data['prob_l']:.1%}", fill="#00FF00", anchor="mm")
-    draw.text((400, 180), "Prob. Victoria Local", fill="gray", anchor="mm")
-    
-    # Cuadro Apuesta
-    draw.rectangle([150, 300, 650, 410], outline="gold", width=2)
-    draw.text((400, 335), f"APUESTA: ${data['apuesta']} MXN", fill="gold", anchor="mm")
-    draw.text((400, 375), f"Cuota: {data['cuota']} | EV: {data['ev']:+.2f}", fill="white", anchor="mm")
+    # Cuadro de Apuesta
+    draw.rectangle([150, 310, 650, 420], outline="gold", width=3)
+    draw.text((400, 345), f"APUESTA: ${data['apuesta']} MXN", fill="gold", anchor="mm")
+    draw.text((400, 385), f"Cuota: {data['cuota']} | EV: {data['ev']:+.2f}", fill="white", anchor="mm")
     
     img.save("prediction_card.png")
 
 if __name__ == "__main__":
-    # 1. Obtener partidos
+    # 1. Buscar partidos
     url = f"https://serpapi.com/search.json?q=proximos+partidos+Liga+MX&api_key={SERPAPI_KEY}"
-    res = requests.get(url).json()
-    matches = res.get("sports_results", {}).get("games", [])[:5]
+    matches = requests.get(url).json().get("sports_results", {}).get("games", [])[:3] # Solo top 3 para ahorrar créditos
     
     results = []
     for m in matches:
-        h_name = m["teams"][0]["name"]
-        a_name = m["teams"][1]["name"]
-        h_logo = m["teams"][0].get("thumbnail")
-        a_logo = m["teams"][1].get("thumbnail")
+        h, a = m["teams"][0]["name"], m["teams"][1]["name"]
+        h_logo, a_logo = m["teams"][0].get("thumbnail"), m["teams"][1].get("thumbnail")
         
-        # Lógica Poisson
-        h_att, h_def = get_stats_from_serp(h_name)
-        a_att, a_def = get_stats_from_serp(a_name)
-        h_xg = (h_att * a_def) * HOME_ADVANTAGE * get_news_impact(h_name)
-        a_xg = (a_att * h_def) * AWAY_PENALTY * get_news_impact(a_name)
+        # Proyección
+        h_att, h_def = get_stats(h)
+        a_att, a_def = get_stats(a)
+        h_xg = (h_att * a_def) * 1.10 * get_news(h)
+        a_xg = (a_att * h_def) * 0.90 * get_news(a)
         
-        prob_l = np.sum(np.tril(np.outer(poisson.pmf(range(10), h_xg), poisson.pmf(range(10), a_xg)), -1))
-        odds = get_market_odds(h_name, a_name)
-        ev = (prob_l * odds[0]) - 1
+        prob = np.sum(np.tril(np.outer(poisson.pmf(range(10), h_xg), poisson.pmf(range(10), a_xg)), -1))
+        cuota = 2.05 # Cuota base (puedes automatizar esto también)
+        ev = (prob * cuota) - 1
         
         apuesta = 0
         if ev > 0:
-            f = ((odds[0]-1)*prob_l - (1-prob_l))/(odds[0]-1)
+            f = ((cuota-1)*prob - (1-prob))/(cuota-1)
             apuesta = round(f * KELLY_FRACTION * BANKROLL_MXN, 2)
         
-        data = {"home": h_name, "away": a_name, "home_logo": h_logo, "away_logo": a_logo, "prob_l": prob_l, "cuota": odds[0], "ev": ev, "apuesta": max(0, apuesta)}
-        save_to_csv(data)
-        results.append(data)
+        res_data = {"home": h, "away": a, "h_logo": h_logo, "a_logo": a_logo, "prob": prob, "cuota": cuota, "ev": ev, "apuesta": max(0, apuesta)}
+        
+        # Guardar en CSV
+        with open("predictions_history.csv", 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([datetime.now(), f"{h} vs {a}", f"{prob:.1%}", ev, apuesta])
+        
+        results.append(res_data)
 
-    # Generar imagen del mejor pick
+    # Generar imagen del mejor
     if results:
         best = max(results, key=lambda x: x['ev'])
         generate_card(best)
