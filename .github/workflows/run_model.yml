@@ -1,4 +1,4 @@
-name: Escaner de Apuestas 8h
+name: Bot de Apuestas 8h
 on:
   workflow_dispatch:
   schedule:
@@ -18,24 +18,24 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install Deps
+      - name: Install Libs
         run: pip install numpy scipy requests Pillow
 
-      - name: Run Model
+      - name: Run Bot
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python main.py
 
-      - name: Send Telegram Image
+      - name: Send Telegram
         run: |
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
             -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
             -F photo=@prediction_card.png \
-            -F caption="🏆 Top Pick Liga MX (MXN) 🏆"
+            -F caption="💰 Pronóstico de Valor (MXN) 💰"
 
-      - name: Save History
+      - name: Push CSV
         run: |
-          git config --global user.name "PredictorBot"
+          git config --global user.name "BotPredictor"
           git config --global user.email "bot@github.com"
           git add predictions_history.csv
           git commit -m "Update history [skip ci]" || echo "No changes"
