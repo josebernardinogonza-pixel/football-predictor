@@ -95,18 +95,55 @@ def get_news(team):
     except: return 1.0
 
 def generate_card(data):
-    img = Image.new('RGB', (800, 450), color=(15, 15, 15))
+    # Crear imagen con mejor resolución (1000x600)
+    img = Image.new('RGB', (1000, 600), color=(10, 10, 10))
     draw = ImageDraw.Draw(img)
-    def load_img(url):
-        try: return Image.open(BytesIO(requests.get(url).content)).convert("RGBA").resize((130, 130))
-        except: return Image.new('RGBA', (130, 130), color=(40, 40, 40))
     
-    img.paste(load_img(data['h_logo']), (80, 100), load_img(data['h_logo']))
-    img.paste(load_img(data['a_logo']), (590, 100), load_img(data['a_logo']))
-    draw.text((400, 40), "PRONÓSTICO LIGA MX", fill="gold", anchor="mm")
-    draw.text((400, 160), f"{data['prob']:.1%}", fill="#00FF00", anchor="mm")
-    draw.rectangle([150, 300, 650, 410], outline="gold", width=2)
-    draw.text((400, 335), f"APUESTA: ${data['apuesta']} MXN", fill="gold", anchor="mm")
+    # Intentar cargar logos con un tiempo de espera mayor
+    def load_img(url):
+        try:
+            if not url: return Image.new('RGBA', (180, 180), color=(30, 30, 30))
+            r = requests.get(url, timeout=10)
+            return Image.open(BytesIO(r.content)).convert("RGBA").resize((180, 180))
+        except:
+            return Image.new('RGBA', (180, 180), color=(30, 30, 30))
+
+    logo_h = load_img(data['h_logo'])
+    logo_a = load_img(data['a_logo'])
+    
+    # Posicionar Logos
+    img.paste(logo_h, (100, 120), logo_h)
+    img.paste(logo_a, (720, 120), logo_a)
+
+    # --- TEXTOS ---
+    # Título Superior
+    draw.text((500, 50), "PRONÓSTICO PROFESIONAL", fill="gold", anchor="mm")
+    
+    # Nombres de Equipos (Más grandes)
+    draw.text((190, 320), data['home'][:15].upper(), fill="white", anchor="mm")
+    draw.text((810, 320), data['away'][:15].upper(), fill="white", anchor="mm")
+    
+    # Etiquetas debajo de logos
+    draw.text((190, 350), "LOCAL", fill="gray", anchor="mm")
+    draw.text((810, 350), "VISITANTE", fill="gray", anchor="mm")
+
+    # PROBABILIDAD (Centro y Gigante)
+    # Dibujamos el texto varias veces para simular "Negrita" si no hay fuentes
+    prob_text = f"{data['prob']:.1%}"
+    pos_centro = (500, 200)
+    draw.text(pos_centro, prob_text, fill="#00FF00", anchor="mm")
+    draw.text((500, 240), "PROBABILIDAD DE VICTORIA", fill="white", anchor="mm")
+
+    # CUADRO DE APUESTA (Llamativo)
+    draw.rectangle([150, 420, 850, 550], outline="gold", width=5)
+    
+    apuesta_text = f"APUESTA SUGERIDA: ${data['apuesta']} MXN"
+    draw.text((500, 460), apuesta_text, fill="gold", anchor="mm")
+    
+    info_text = f"CUOTA: {data['cuota']}  |  VALOR (EV): {data['ev']:+.2f}"
+    draw.text((500, 510), info_text, fill="white", anchor="mm")
+
+    # Guardar imagen
     img.save("prediction_card.png")
 
 # ==========================================
