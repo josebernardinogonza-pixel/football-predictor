@@ -37,42 +37,42 @@ def get_real_result(home, away):
     return None
 
 def audit_past_predictions():
-    """Revisa el historial y calcula precisión (CON FILTRO DE SEGURIDAD)"""
+    """Revisa las últimas predicciones y calcula la precisión"""
     file = "predictions_history.csv"
-    if not os.path.isfile(file): return "Esperando primer historial..."
+    if not os.path.isfile(file): return "Sin historial aún."
     
-    hits, total = 0, 0
-    report = "📊 *AUDITORÍA DE RESULTADOS*\n"
-    
-    with open(file, 'r', encoding='utf-8') as f:
+    hits = 0
+    total_audited = 0
+    # USAMOS HTML EN LUGAR DE MARKDOWN
+    report = "<b>📊 AUDITORÍA DE RESULTADOS</b>\n\n"
+
+    with open(file, 'r') as f:
         rows = list(csv.reader(f))
-        # Analizamos las últimas 5 filas para ver rendimiento reciente
+        # Analizamos los últimos 5 partidos (saltando la cabecera si existe)
         for row in rows[-5:]:
-            # --- FILTRO DE SEGURIDAD: Solo procesar filas con 6 columnas (formato actual) ---
-            if len(row) != 6: 
-                continue 
-            
-            fecha, partido, prob, cuota, ev, apuesta = row
-            if "vs" not in partido: continue
-            
             try:
+                # FIX: Usamos row[:5] para evitar el error de "too many values to unpack"
+                fecha, partido, prob, ev, apuesta = row[:5]
                 home, away = partido.split(" vs ")
-                res_real = get_real_result(home, away)
-                if res_real:
-                    total += 1
-                    if res_real == "L": # Asumimos que apostamos al Local (L)
+                
+                resultado_real = get_real_result(home, away)
+                if resultado_real:
+                    total_audited += 1
+                    if resultado_real == "L": # Asumiendo que apostamos al Local
                         hits += 1
-                        report += f"✅ {home}: ACERTADO\n"
+                        report += f"✅ {home} vs {away}: ACERTADO\n"
                     else:
-                        report += f"❌ {home}: FALLADO\n"
-            except: continue
-
-    if total > 0:
-        report += f"\n🎯 *Precisión Reciente: {(hits/total):.1%}"
+                        report += f"❌ {home} vs {away}: FALLADO\n"
+            except:
+                continue
+    
+    if total_audited > 0:
+        precision = (hits / total_audited) * 100
+        report += f"\n<b>🎯 Precisión Reciente: {precision:.1%}/b>"
     else:
-        report = "⏳ Analizando partidos en curso..."
+        report = "⏳ Esperando resultados para auditar..."
+    
     return report
-
 # ==========================================
 # FUNCIONES DE PREDICCIÓN
 # ==========================================
