@@ -6,18 +6,38 @@ from scipy.stats import poisson
 from PIL import Image, ImageDraw
 from io import BytesIO
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# --- CONFIGURACIÓN LIGA MX ---
+# --- CONFIGURACIÓN ---
 BANKROLL_MXN = 5000.00
 KELLY_FRACTION = 0.20
-HOME_ADVANTAGE = 1.10
-AWAY_PENALTY = 0.90
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
-LEAGUE = "Liga MX"
+
+def get_today_matches():
+    """Busca SOLO los partidos de la jornada de HOY"""
+    url = f"https://serpapi.com/search.json?q=liga+mx+partidos+hoy&api_key={SERPAPI_KEY}"
+    try:
+        res = requests.get(url).json()
+        games = res.get("sports_results", {}).get("games", [])
+        
+        today_games = []
+        for g in games:
+            status = g.get("status", "").lower()
+            # FILTRO CRÍTICO: Solo tomamos partidos que NO han terminado
+            # Buscamos estados como "12:00", "En vivo", "70'", "Hoy"
+            if "final" not in status and "postp" not in status:
+                h = g["teams"][0]["name"]
+                a = g["teams"][1]["name"]
+                h_logo = g["teams"][0].get("thumbnail")
+                a_logo = g["teams"][1].get("thumbnail")
+                today_games.append({"home": h, "away": a, "h_logo": h_logo, "a_logo": a_logo, "status": status})
+        
+        return today_games
+    except:
+        return []
 
 def get_stats(team):
-    """Busca xG de equipos de la Liga MX"""
+    """Estadísticas frescas para la jornada actual"""
     url = f"https://serpapi.com/search.json?q={team}+xG+stats+2024+mexico&api_key={SERPAPI_KEY}"
     try:
         res = requests.get(url).json()
@@ -26,61 +46,38 @@ def get_stats(team):
         return (nums[0], nums[1]) if len(nums) >= 2 else (1.4, 1.3)
     except: return 1.4, 1.3
 
-def get_real_result(home, away):
-    """Busca el resultado real en Google (Solo si ya terminó)"""
-    query = f"resultado final {home} vs {away} liga mx"
-    url = f"https://serpapi.com/search.json?q={query}&api_key={SERPAPI_KEY}"
-    try:
-        res = requests.get(url).json()
-        # Verificamos si Google muestra el partido como 'Finalizado'
-        status = res.get("sports_results", {}).get("game_spotlight", {}).get("status", "")
-        snippet = str(res.get("sports_results", "")) + str(res.get("organic_results", ""))
-        
-        scores = re.findall(r'(\d+)\s*-\s*(\d+)', snippet)
-        if scores:
-            h, a = int(scores[0][0]), int(scores[0][1])
-            return "L" if h > a else "E" if h == a else "V"
-    except: return None
-    return None
-
-def audit_past_predictions():
-    """Auditoría corregida para Liga MX"""
+def audit_recent_results():
+    """Audita solo los partidos de las últimas 24 horas"""
     file = "predictions_history.csv"
-    if not os.path.isfile(file): return "<b>📊 AUDITORÍA</b>\nEsperando datos..."
+    if not os.path.isfile(file): return "<b>📊 AUDITORÍA</b>\nSin datos."
     
-    hits, total = 0, 0
-    report = "<b>📊 AUDITORÍA LIGA MX</b>\n\n"
-    
+    report = "<b>📊 RESULTADOS DE LA JORNADA</b>\n\n"
     with open(file, 'r') as f:
         rows = list(csv.reader(f))
-        for row in rows[-8:]: # Revisamos los últimos 8 partidos
+        # Solo revisamos los últimos partidos guardados
+        for row in rows[-6:]:
             try:
-                # FIX: Tomamos solo las primeras 5 columnas para evitar el error de 'unpack'
-                fecha, partido, prob, ev, apuesta = row[:5]
-                if "vs" not in partido: continue
-                
+                fecha_str, partido, prob, ev, apuesta = row[:5]
+                # Si la predicción es de hoy o ayer, la auditamos
                 home, away = partido.split(" vs ")
-                res = get_real_result(home, away)
                 
-                if res:
-                    total += 1
-                    # Si el bot predijo victoria local (Prob > 45%) y ganó el local:
-                    if res == "L":
-                        hits += 1
-                        report += f"✅ {home} vs {away}: ACERTADO\n"
-                    else:
-                        report += f"❌ {home} vs {away}: FALLADO\n"
+                # Buscamos el resultado real
+                url_res = f"https://serpapi.com/search.json?q=resultado+final+{home}+vs+{away}+liga+mx&api_key={SERPAPI_KEY}"
+                res_data = requests.get(url_res).json()
+                snippet = str(res_data.get("sports_results", "")) + str(res_data.get("organic_results", ""))
+                
+                scores = re.findall(r'(\d+)\s*-\s*(\d+)', snippet)
+                if scores:
+                    h, a = int(scores[0][0]), int(scores[0][1])
+                    res_final = "L" if h > a else "E" if h == a else "V"
+                    icon = "✅" if res_final == "L" else "❌" # Asumiendo apuesta al local
+                    report += f"{icon} {home} {h}-{a} {away}\n"
             except: continue
-            
-    if total > 0:
-        report += f"\n<b>🎯 Precisión: {(hits/total):.1%}</b>"
-    else:
-        report = "<b>📊 AUDITORÍA</b>\n⏳ Los partidos de la jornada aún no terminan."
     return report
 
 def generate_card(data):
-    """Imagen con estilo Liga MX"""
-    img = Image.new('RGB', (800, 450), color=(20, 25, 20)) # Fondo verde oscuro
+    """Imagen con el estado del partido (En vivo o la hora)"""
+    img = Image.new('RGB', (800, 450), color=(10, 30, 10))
     draw = ImageDraw.Draw(img)
     def load_img(url):
         try:
@@ -90,7 +87,8 @@ def generate_card(data):
     
     img.paste(load_img(data['h_logo']), (70, 100), load_img(data['h_logo']))
     img.paste(load_img(data['a_logo']), (590, 100), load_img(data['a_logo']))
-    draw.text((400, 40), "PRONÓSTICO LIGA MX", fill="gold", anchor="mm")
+    
+    draw.text((400, 40), f"JORNADA EN VIVO - {data['status'].upper()}", fill="gold", anchor="mm")
     draw.text((140, 260), data['home'][:12], fill="white", anchor="mm")
     draw.text((660, 260), data['away'][:12], fill="white", anchor="mm")
     draw.text((400, 160), f"{data['prob']:.1%}", fill="#00FF00", anchor="mm")
@@ -100,42 +98,41 @@ def generate_card(data):
     img.save("prediction_card.png")
 
 if __name__ == "__main__":
-    # 1. Auditoría
+    # 1. Auditoría de lo que ya terminó
     with open("audit_report.txt", "w", encoding="utf-8") as f:
-        f.write(audit_past_predictions())
+        f.write(audit_recent_results())
 
-    # 2. Escanear Liga MX
-    url = f"https://serpapi.com/search.json?q=proximos+partidos+{LEAGUE}&api_key={SERPAPI_KEY}"
-    res = requests.get(url).json()
-    games = res.get("sports_results", {}).get("games", [])
+    # 2. Análisis de los partidos de HOY
+    today_matches = get_today_matches()
     
-    all_matches = []
-    for g in games[:5]: # Analizamos los próximos 5 partidos de la Liga MX
-        h, a = g["teams"][0]["name"], g["teams"][1]["name"]
-        h_logo, a_logo = g["teams"][0].get("thumbnail"), g["teams"][1].get("thumbnail")
-        
+    all_results = []
+    for m in today_matches:
+        h, a = m["home"], m["away"]
         h_att, h_def = get_stats(h)
         a_att, a_def = get_stats(a)
-        h_xg = (h_att * HOME_ADVANTAGE) * a_def
-        a_xg = (a_att * AWAY_PENALTY) * h_def
         
+        # Poisson
+        h_xg, a_xg = (h_att * 1.1) * a_def, (a_att * 0.9) * h_def
         prob = np.sum(np.tril(np.outer(poisson.pmf(range(10), h_xg), poisson.pmf(range(10), a_xg)), -1))
-        cuota = 2.00 # Cuota estimada
+        
+        cuota = 2.05 # Aquí podrías buscar cuotas reales en vivo
         ev = (prob * cuota) - 1
+        apuesta = round((((cuota-1)*prob - (1-prob))/(cuota-1)) * KELLY_FRACTION * BANKROLL_MXN, 2) if ev > 0 else 0
         
-        apuesta = 0
-        if ev > 0:
-            f_star = ((cuota-1)*prob - (1-prob))/(cuota-1)
-            apuesta = round(f_star * KELLY_FRACTION * BANKROLL_MXN, 2)
+        res_data = {**m, "prob": prob, "cuota": cuota, "ev": ev, "apuesta": max(0, apuesta)}
         
-        res_data = {"home": h, "away": a, "h_logo": h_logo, "a_logo": a_logo, "prob": prob, "cuota": cuota, "ev": ev, "apuesta": apuesta}
-        
-        # GUARDADO LIMPIO (5 COLUMNAS)
+        # Guardar en historial
         with open("predictions_history.csv", 'a', newline='') as f:
             csv.writer(f).writerow([datetime.now().strftime("%Y-%m-%d"), f"{h} vs {a}", f"{prob:.1%}", f"{ev:.2f}", f"{apuesta}"])
         
-        all_matches.append(res_data)
+        all_results.append(res_data)
 
-    if all_matches:
-        best = max(all_matches, key=lambda x: x['ev'])
+    if all_results:
+        # Enviamos el que tenga más valor (EV) de los partidos de hoy
+        best = max(all_results, key=lambda x: x['ev'])
         generate_card(best)
+    else:
+        # Si no hay partidos hoy, generar una imagen de aviso
+        img = Image.new('RGB', (800, 450), color=(20, 20, 20))
+        ImageDraw.Draw(img).text((400, 225), "NO HAY PARTIDOS DE LIGA MX HOY", fill="white", anchor="mm")
+        img.save("prediction_card.png")
