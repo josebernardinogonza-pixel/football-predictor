@@ -1,60 +1,54 @@
-name: Bot de Apuestas Inteligente 8h
+name: Bot de Apuestas Live 8h
 
 on:
-  workflow_dispatch: # Permite ejecutarlo manualmente desde el móvil
+  workflow_dispatch:
   schedule:
-    - cron: '0 */8 * * *' # Se ejecuta automáticamente cada 8 horas
+    - cron: '0 */8 * * *'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Permiso necesario para guardar el historial CSV
+      contents: write
 
     steps:
-      - name: 1. Descargar Codigo del Repositorio
+      - name: 1. Descargar Codigo
         uses: actions/checkout@v3
 
-      - name: 2. Configurar Entorno Python
+      - name: 2. Configurar Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 3. Instalar Librerias Necesarias
-        run: |
-          pip install numpy scipy requests Pillow
+      - name: 3. Instalar Librerias
+        run: pip install numpy scipy requests Pillow
 
-      - name: 4. Ejecutar Cerebro del Bot (Python)
+      - name: 4. Ejecutar Cerebro del Bot
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
       - name: 5. Enviar Reporte de Auditoria (Texto)
+        # Usamos --data-urlencode para que el texto no rompa el comando
         run: |
-          # Leemos el reporte generado por Python
-          REPORT=$(cat audit_report.txt)
-          # Enviamos a Telegram usando la API oficial
+          REPORT_TEXT=$(cat audit_report.txt)
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
-            -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-            -d text="$REPORT" \
-            -d parse_mode="Markdown"
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=$REPORT_TEXT" \
+            -d parse_mode="HTML"
 
       - name: 6. Enviar Nuevo Pronostico (Imagen)
         run: |
-          # Enviamos la imagen generada por Python
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
             -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
             -F photo=@prediction_card.png \
-            -F caption="💰 *Nueva Oportunidad Detectada (MXN)* 💰" \
-            -F parse_mode="Markdown"
+            -F caption="💰 <b>Análisis en Tiempo Real</b>" \
+            -F parse_mode="HTML"
 
-      - name: 7. Guardar y Sincronizar Historial CSV
+      - name: 7. Guardar Historial
         run: |
-          git config --global user.name "BotPredictor-AI"
-          git config --global user.email "bot-ai@github.com"
+          git config --global user.name "BotPredictor"
+          git config --global user.email "bot@github.com"
           git add predictions_history.csv
-          # Hacemos commit solo si hubo cambios en el historial
-          git commit -m "Actualización de Memoria Histórica [skip ci]" || echo "Sin cambios en el historial"
+          git commit -m "Update history [skip ci]" || echo "No changes"
           git push
