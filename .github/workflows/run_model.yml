@@ -1,53 +1,41 @@
-name: Bot de Apuestas (Estrategia Dinamica)
-
+name: Bot de Apuestas Inteligente 8h
 on:
   workflow_dispatch:
   schedule:
-    # Lunes a Jueves: 12:00 PM (18:00 UTC)
-    - cron: '0 18 * * 1-4'
-    # Viernes a Domingo: Cada 5 horas
-    - cron: '0 */5 * * 5,6,0'
+    - cron: '0 18 * * 1-4' # L-J a las 12pm CDMX
+    - cron: '0 */5 * * 5,6,0' # Fin de semana cada 5h
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
-      - name: Install Deps
+      - name: Install Libs
         run: pip install numpy scipy requests Pillow
-
-      - name: Run Cerebro
+      - name: Run Bot
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python main.py
-
-      - name: Send Telegram Report
+      - name: Send Telegram
         run: |
           REPORT=$(cat audit_report.txt)
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=$REPORT" \
             -d parse_mode="HTML"
-
-      - name: Send Telegram Photo
-        run: |
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
             -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
             -F photo=@prediction_card.png \
-            -F caption="💰 <b>PLAN DE RECUPERACIÓN (MXN)</b>" \
+            -F caption="💰 <b>Análisis de Inversión</b>" \
             -F parse_mode="HTML"
-
-      - name: Save History
+      - name: Save CSV
         run: |
           git config --global user.name "BotPredictor"
           git config --global user.email "bot@github.com"
