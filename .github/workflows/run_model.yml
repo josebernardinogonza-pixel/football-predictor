@@ -1,9 +1,12 @@
-name: Bot de Apuestas Live 8h
+name: Bot de Apuestas (Estrategia Dinamica)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */8 * * *'
+    # Lunes a Jueves: 12:00 PM (18:00 UTC)
+    - cron: '0 18 * * 1-4'
+    # Viernes a Domingo: Cada 5 horas
+    - cron: '0 */5 * * 5,6,0'
 
 jobs:
   build:
@@ -12,40 +15,39 @@ jobs:
       contents: write
 
     steps:
-      - name: 1. Descargar Codigo
+      - name: Checkout
         uses: actions/checkout@v3
 
-      - name: 2. Configurar Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 3. Instalar Librerias
+      - name: Install Deps
         run: pip install numpy scipy requests Pillow
 
-      - name: 4. Ejecutar Cerebro del Bot
+      - name: Run Cerebro
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python main.py
 
-      - name: 5. Enviar Reporte de Auditoria (Texto)
-        # Usamos --data-urlencode para que el texto no rompa el comando
+      - name: Send Telegram Report
         run: |
-          REPORT_TEXT=$(cat audit_report.txt)
+          REPORT=$(cat audit_report.txt)
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode "text=$REPORT_TEXT" \
+            --data-urlencode "text=$REPORT" \
             -d parse_mode="HTML"
 
-      - name: 6. Enviar Nuevo Pronostico (Imagen)
+      - name: Send Telegram Photo
         run: |
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
             -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
             -F photo=@prediction_card.png \
-            -F caption="💰 <b>Análisis en Tiempo Real</b>" \
+            -F caption="💰 <b>PLAN DE RECUPERACIÓN (MXN)</b>" \
             -F parse_mode="HTML"
 
-      - name: 7. Guardar Historial
+      - name: Save History
         run: |
           git config --global user.name "BotPredictor"
           git config --global user.email "bot@github.com"
