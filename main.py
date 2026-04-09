@@ -3,91 +3,97 @@ import requests
 import numpy as np
 from scipy.stats import poisson
 from PIL import Image, ImageDraw
-from io import BytesIO
 import csv
 from datetime import datetime
+import betfairlightweight
+from betfairlightweight import filters
 
-# --- CONFIGURACIÓN ---
-API_KEY = os.getenv("ALL_SPORTS_API_KEY")
-BASE_URL = "https://apiv2.allsportsapi.com/football/"
-BANKROLL_MXN = 4875.00
+# --- CONFIGURACIÓN DE ÉLITE ---
+BANKROLL_MXN = 8110.00
 KELLY_FRACTION = 0.20
+APP_KEY = os.getenv("BETFAIR_APP_KEY")
+USERNAME = os.getenv("BETFAIR_USERNAME")
+PASSWORD = os.getenv("BETFAIR_PASSWORD")
 
-def initialize_files():
-    """Crea los archivos necesarios para que el Workflow no de error"""
-    with open("audit_report.txt", "w", encoding="utf-8") as f:
-        f.write("<b>📊 ESCÁNER ALL-SPORTS-API</b>\nBuscando partidos en vivo...")
-    
-    # Imagen de respaldo
-    img = Image.new('RGB', (800, 450), color=(15, 15, 15))
-    img.save("prediction_card.png")
-
-def get_live_data():
-    """Obtiene datos reales de AllSportsApi.com"""
-    params = {
-        'met': 'Livescore',
-        'APIkey': API_KEY
-    }
+def get_betfair_price(event_name):
+    """Conecta a Betfair para obtener la cuota real y liquidez"""
     try:
-        response = requests.get(BASE_URL, params=params, timeout=15).json()
-        if "result" in response:
-            return response["result"]
-        return []
-    except Exception as e:
-        print(f"Error de conexión con AllSportsApi: {e}")
-        return []
+        trading = betfairlightweight.APIClient(USERNAME, PASSWORD, app_key=APP_KEY)
+        trading.login()
+        
+        # Buscar el evento
+        event_filter = filters.market_filter(text_query=event_name)
+        events = trading.betting.list_events(filter=event_filter)
+        
+        if not events: return 2.00 # Cuota base si no hay mercado
+        
+        event_id = events[0].event.id
+        market_catalogue = trading.betting.list_market_catalogue(
+            filter=filters.market_filter(event_ids=[event_id], market_type_codes=['MATCH_ODDS']),
+            max_results=1
+        )
+        
+        if not market_catalogue: return 2.00
+        
+        market_id = market_catalogue[0].market_id
+        market_book = trading.betting.list_market_book(market_ids=[market_id])[0]
+        
+        # Obtener la mejor cuota de 'Back' (A favor)
+        best_odds = market_book.runners[0].ex.available_to_back[0].price
+        return best_odds
+    except:
+        return 1.95 # Fallback de seguridad
 
-def generate_card(game):
-    """Genera la imagen usando los datos de la API"""
-    img = Image.new('RGB', (800, 450), color=(10, 10, 30))
+def predict_nba_efficiency(h_rtg, a_rtg, cuota):
+    """Modelo de Eficiencia NBA"""
+    diff = h_rtg - a_rtg
+    prob = 1 / (1 + np.exp(-diff/12))
+    ev = (prob * cuota) - 1
+    apuesta = round(ev * KELLY_FRACTION * BANKROLL_MXN, 2) if ev > 0.05 else 0
+    return prob, ev, max(0, apuesta)
+
+def generate_betfair_card(picks):
+    """Genera la infografía con datos de Betfair"""
+    img = Image.new('RGB', (1000, 1000), color=(5, 5, 15))
     draw = ImageDraw.Draw(img)
-    
-    # Descargar logos reales de la API
-    def load_logo(url):
-        try:
-            res = requests.get(url, timeout=5)
-            return Image.open(BytesIO(res.content)).convert("RGBA").resize((130, 130))
-        except:
-            return Image.new('RGBA', (130, 130), color=(40, 40, 40))
+    draw.rectangle([0, 0, 1000, 100], fill="#FFB80C") # Amarillo Betfair
+    draw.text((500, 50), "BETFAIR EXCHANGE INTELLIGENCE - 09/04/2026", fill="black", anchor="mm")
 
-    logo_h = load_logo(game.get('home_team_logo'))
-    logo_a = load_logo(game.get('away_team_logo'))
-    img.paste(logo_h, (80, 100), logo_h)
-    img.paste(logo_a, (590, 100), logo_a)
-
-    # Marcador y Nombres
-    draw.text((400, 40), f"EN VIVO: {game.get('event_status')}'", fill="red", anchor="mm")
-    draw.text((400, 150), game.get('event_final_result'), fill="white", anchor="mm")
-    draw.text((145, 250), game.get('event_home_team')[:12], fill="white", anchor="mm")
-    draw.text((655, 250), game.get('event_away_team')[:12], fill="white", anchor="mm")
+    y = 150
+    for p in picks:
+        draw.text((100, y), f"{p['match']}", fill="white")
+        draw.text((100, y+40), f"Pick: {p['pick']} | Prob: {p['prob']:.1%}", fill="#00FF00")
+        draw.text((700, y+40), f"Cuota BF: {p['cuota']} | ${p['apuesta']} MXN", fill="gold")
+        draw.line([100, y+90, 900, y+90], fill=(40, 40, 40))
+        y += 120
     
-    # Predicción (Poisson simplificado)
-    draw.text((400, 350), "ANÁLISIS DE VALOR EN CURSO", fill="gold", anchor="mm")
     img.save("prediction_card.png")
 
 if __name__ == "__main__":
-    # 1. Asegurar archivos para el Workflow
-    initialize_files()
+    # 1. ANALISIS DE JORNADA NBA (09/04/2026)
+    nba_matches = [
+        {"match": "NY Knicks vs ATL Hawks", "h_rtg": 118, "a_rtg": 110},
+        {"match": "PHI 76ers vs SA Spurs", "h_rtg": 116, "a_rtg": 114},
+        {"match": "DET Pistons vs ORL Magic", "h_rtg": 102, "a_rtg": 115},
+        {"match": "POR Blazers vs DEN Nuggets", "h_rtg": 105, "a_rtg": 122}
+    ]
     
-    # 2. Consultar AllSportsApi
-    live_matches = get_live_data()
-    
-    if live_matches:
-        # Tomamos el primer partido disponible (puedes filtrar por liga)
-        match = live_matches[0]
+    final_picks = []
+    report = "<b>📊 AUDITORÍA BETFAIR LIVE</b>\n\n"
+
+    for m in nba_matches:
+        cuota_bf = get_betfair_price(m['match'])
+        prob, ev, apuesta = predict_nba_efficiency(m['h_rtg'], m['a_rtg'], cuota_bf)
         
-        # Actualizar reporte de texto
-        with open("audit_report.txt", "w", encoding="utf-8") as f:
-            f.write(f"<b>✅ PARTIDO DETECTADO</b>\n{match['event_home_team']} vs {match['event_away_team']}\nMarcador: {match['event_final_result']}")
+        res = {**m, "prob": prob, "cuota": cuota_bf, "ev": ev, "apuesta": apuesta, "pick": "Gana Local"}
+        final_picks.append(res)
         
-        # Generar imagen con logos de la API
-        generate_card(match)
+        report += f"🔹 {m['match']}: EV {ev:+.2f} (Cuota BF: {cuota_bf})\n"
         
-        # Guardar en historial CSV
         with open("predictions_history.csv", 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([datetime.now(), f"{match['event_home_team']} vs {match['event_away_team']}", "LIVE", "API_DATA", "0"])
-            
-        print(f"Procesado: {match['event_home_team']}")
-    else:
-        print("No hay partidos en vivo en AllSportsApi ahora mismo.")
+            csv.writer(f).writerow([datetime.now().strftime("%Y-%m-%d"), m['match'], f"{prob:.1%}", f"{ev:.2f}", f"{apuesta}"])
+
+    with open("audit_report.txt", "w", encoding="utf-8") as f:
+        f.write(report)
+
+    generate_betfair_card(final_picks)
