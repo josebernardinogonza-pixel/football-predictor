@@ -1,58 +1,62 @@
-name: Bot de Apuestas Inteligente 8h
+name: Bot de Apuestas Pro (AllSportsAPI)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Permite ejecución manual desde el móvil
   schedule:
-    - cron: '0 18 * * 1-4' # L-J a las 12pm CDMX
-    - cron: '0 */5 * * 5,6,0' # Fin de semana cada 5h
+    # Lunes a Jueves: Una ejecución diaria a las 12:00 PM (18:00 UTC)
+    - cron: '0 18 * * 1-4' 
+    
+    # Viernes a Domingo: Ejecución cada 5 horas para captar jornadas en vivo
+    - cron: '0 */5 * * 5,6,0'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Permiso crítico para actualizar el historial CSV
+
     steps:
-      - name: Checkout
+      - name: 1. Descargar Codigo del Repositorio
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: 2. Configurar Entorno Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install Libs
-        run: pip install numpy scipy requests Pillow
+      - name: 3. Instalar Librerias (Matematicas e Imagen)
+        run: |
+          pip install numpy scipy requests Pillow
 
-      - name: Run Bot
+      - name: 4. Ejecutar Cerebro del Bot (Analisis Pro)
         env:
+          # MIGRACIÓN: Ahora usamos la API de Deportes dedicada
           ALL_SPORTS_API_KEY: ${{ secrets.ALL_SPORTS_API_KEY }}
         run: python main.py
 
-      - name: Send Telegram
+      - name: 5. Enviar Reporte de Auditoria a Telegram
         run: |
-          # Solo intenta leer el reporte si el archivo existe (aunque el script ya garantiza su creación)
-          if [ -f audit_report.txt ]; then
-            REPORT=$(cat audit_report.txt)
-            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
-              --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-              --data-urlencode "text=$REPORT" \
-              -d parse_mode="HTML"
-          fi
-          
-          # Solo envía la foto si la tarjeta fue generada
-          if [ -f prediction_card.png ]; then
-            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
-              -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-              -F photo=@prediction_card.png \
-              -F caption="💰 <b>Análisis de Inversión Real</b>" \
-              -F parse_mode="HTML"
-          fi
+          # Capturamos el reporte generado por el script de Python
+          REPORT=$(cat audit_report.txt)
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=$REPORT" \
+            -d parse_mode="HTML"
 
-      - name: Save CSV
+      - name: 6. Enviar Tarjeta de Inversion (Imagen)
         run: |
-          git config --global user.name "BotPredictor"
-          git config --global user.email "bot@github.com"
-          # Agregamos el reporte y el historial
-          git add predictions_history.csv || echo "No CSV yet"
-          git commit -m "Update history [skip ci]" || echo "No changes to commit"
+          # Enviamos la infografía generada con los logos de la API
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
+            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+            -F photo=@prediction_card.png \
+            -F caption="🚨 <b>NUEVA OPORTUNIDAD DETECTADA (ALL-SPORTS-DATA)</b>" \
+            -F parse_mode="HTML"
+
+      - name: 7. Sincronizar Memoria Historica (CSV)
+        run: |
+          git config --global user.name "BotPredictor-Pro"
+          git config --global user.email "bot-pro@github.com"
+          git add predictions_history.csv
+          # Guardamos los resultados para que el bot aprenda de la jornada
+          git commit -m "Update history with AllSportsAPI data [skip ci]" || echo "No hay cambios para guardar"
           git push
