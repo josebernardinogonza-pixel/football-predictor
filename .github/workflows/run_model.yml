@@ -1,4 +1,5 @@
 name: Bot de Apuestas Inteligente 8h
+
 on:
   workflow_dispatch:
   schedule:
@@ -13,32 +14,45 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+
       - name: Install Libs
         run: pip install numpy scipy requests Pillow
+
       - name: Run Bot
         env:
-          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          ALL_SPORTS_API_KEY: ${{ secrets.ALL_SPORTS_API_KEY }}
         run: python main.py
+
       - name: Send Telegram
         run: |
-          REPORT=$(cat audit_report.txt)
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
-            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode "text=$REPORT" \
-            -d parse_mode="HTML"
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
-            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-            -F photo=@prediction_card.png \
-            -F caption="💰 <b>Análisis de Inversión</b>" \
-            -F parse_mode="HTML"
+          # Solo intenta leer el reporte si el archivo existe (aunque el script ya garantiza su creación)
+          if [ -f audit_report.txt ]; then
+            REPORT=$(cat audit_report.txt)
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+              --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+              --data-urlencode "text=$REPORT" \
+              -d parse_mode="HTML"
+          fi
+          
+          # Solo envía la foto si la tarjeta fue generada
+          if [ -f prediction_card.png ]; then
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
+              -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+              -F photo=@prediction_card.png \
+              -F caption="💰 <b>Análisis de Inversión Real</b>" \
+              -F parse_mode="HTML"
+          fi
+
       - name: Save CSV
         run: |
           git config --global user.name "BotPredictor"
           git config --global user.email "bot@github.com"
-          git add predictions_history.csv
-          git commit -m "Update history [skip ci]" || echo "No changes"
+          # Agregamos el reporte y el historial
+          git add predictions_history.csv || echo "No CSV yet"
+          git commit -m "Update history [skip ci]" || echo "No changes to commit"
           git push
