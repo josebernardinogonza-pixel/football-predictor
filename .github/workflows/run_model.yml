@@ -1,10 +1,12 @@
-name: Bot de Apuestas Betfair Pro
+name: Bot de Apuestas 100% Autonomo
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 18 * * 1-4' # 12:00 PM L-J
-    - cron: '0 */5 * * 5,6,0' # Cada 5h V-D
+    # Lunes a Jueves: 12:00 PM CDMX (18:00 UTC)
+    - cron: '0 18 * * 1-4'
+    # Viernes a Domingo: Cada 5 horas
+    - cron: '0 */5 * * 5,6,0'
 
 jobs:
   build:
@@ -21,10 +23,10 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install Deps
+      - name: Install Dependencies
         run: pip install numpy scipy requests Pillow betfairlightweight
 
-      - name: Run Cerebro Betfair
+      - name: Run Intelligence Engine
         env:
           BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
           BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
@@ -32,23 +34,26 @@ jobs:
           ALL_SPORTS_API_KEY: ${{ secrets.ALL_SPORTS_API_KEY }}
         run: python main.py
 
-      - name: Send Telegram
+      - name: Send Telegram Report
         run: |
           REPORT=$(cat audit_report.txt)
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=$REPORT" \
             -d parse_mode="HTML"
+
+      - name: Send Telegram Infographic
+        run: |
           curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
             -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
             -F photo=@prediction_card.png \
-            -F caption="🚨 <b>CARTELERA BETFAIR (MXN)</b>" \
+            -F caption="🚨 <b>CARTELERA DE INVERSIÓN GENERADA</b>" \
             -F parse_mode="HTML"
 
-      - name: Save History
+      - name: Auto-Save to History
         run: |
-          git config --global user.name "BotPredictor"
-          git config --global user.email "bot@github.com"
+          git config --global user.name "BotMaestro"
+          git config --global user.email "maestro@bot.com"
           git add predictions_history.csv
-          git commit -m "Update history with Betfair [skip ci]" || echo "No changes"
+          git commit -m "Auto-update history [skip ci]" || echo "No changes"
           git push
