@@ -1,12 +1,10 @@
-name: Bot de Apuestas 100% Autonomo
+name: Bot de Apuestas Liga MX Pro
 
 on:
   workflow_dispatch:
   schedule:
-    # Lunes a Jueves: 12:00 PM CDMX (18:00 UTC)
-    - cron: '0 18 * * 1-4'
-    # Viernes a Domingo: Cada 5 horas
-    - cron: '0 */5 * * 5,6,0'
+    - cron: '0 18 * * 1-4' # L-J 12pm
+    - cron: '0 */5 * * 5,6,0' # V-D cada 5h
 
 jobs:
   build:
@@ -15,45 +13,46 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: 1. Checkout
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: 2. Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install Dependencies
-        run: pip install numpy scipy requests Pillow betfairlightweight
+      - name: 3. Install Deps
+        run: pip install numpy scipy requests Pillow
 
-      - name: Run Intelligence Engine
+      - name: 4. Run Cerebro
         env:
-          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
-          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
-          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
           ALL_SPORTS_API_KEY: ${{ secrets.ALL_SPORTS_API_KEY }}
         run: python main.py
 
-      - name: Send Telegram Report
+      - name: 5. Send Telegram Report
         run: |
-          REPORT=$(cat audit_report.txt)
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
-            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode "text=$REPORT" \
-            -d parse_mode="HTML"
+          if [ -f audit_report.txt ]; then
+            REPORT=$(cat audit_report.txt)
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+              --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+              --data-urlencode "text=$REPORT" \
+              -d parse_mode="HTML"
+          fi
 
-      - name: Send Telegram Infographic
+      - name: 6. Send Telegram Photo
         run: |
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
-            -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-            -F photo=@prediction_card.png \
-            -F caption="🚨 <b>CARTELERA DE INVERSIÓN GENERADA</b>" \
-            -F parse_mode="HTML"
+          if [ -f prediction_card.png ]; then
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
+              -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+              -F photo=@prediction_card.png \
+              -F caption="🚨 <b>CARTELERA LIGA MX - JORNADA 14</b>" \
+              -F parse_mode="HTML"
+          fi
 
-      - name: Auto-Save to History
+      - name: 7. Save History
         run: |
-          git config --global user.name "BotMaestro"
-          git config --global user.email "maestro@bot.com"
+          git config --global user.name "BotPredictor"
+          git config --global user.email "bot@predictor.com"
           git add predictions_history.csv
-          git commit -m "Auto-update history [skip ci]" || echo "No changes"
+          git commit -m "Update history Liga MX [skip ci]" || echo "No changes"
           git push
