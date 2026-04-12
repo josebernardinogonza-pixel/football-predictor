@@ -1,58 +1,41 @@
-name: Bot de Apuestas El Maestro PRO
+name: Edge Bot Pro Automático
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 18 * * 1-4' # L-J 12:00 PM
-    - cron: '0 */5 * * 5,6,0' # V-D cada 5h
+    - cron: '0 * * * *' # Se ejecuta en el minuto 0 de CADA HORA
+  workflow_dispatch:
+
+permissions:
+  contents: write # Permiso vital para que el bot pueda guardar su memoria
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: 1. Checkout
-        uses: actions/checkout@v3
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
 
-      - name: 2. Setup Python
-        uses: actions/setup-python@v4
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
-      - name: 3. Install Libs
-        run: pip install numpy scipy requests Pillow
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
 
-      - name: 4. Run Cerebro
+      - name: Generar archivo de aprendizaje
+        run: python data/aprendizaje.py
+
+      - name: Ejecutar Edge Bot Pro
         env:
-          ALL_SPORTS_API_KEY: ${{ secrets.ALL_SPORTS_API_KEY }}
-        run: python main.py
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot.py
 
-      - name: 5. Send Telegram Report
-        run: |
-          if [ -f audit_report.txt ]; then
-            REPORT=$(cat audit_report.txt)
-            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
-              --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-              --data-urlencode "text=$REPORT" \
-              -d parse_mode="HTML"
-          fi
-
-      - name: 6. Send Telegram Photo
-        run: |
-          if [ -f prediction_card.png ]; then
-            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
-              -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-              -F photo=@prediction_card.png \
-              -F caption="🚨 <b>CARTELERA MAESTRA GLOBAL</b>" \
-              -F parse_mode="HTML"
-          fi
-
-      - name: 7. Sync History
-        run: |
-          git config --global user.name "BotMaestro-AI"
-          git config --global user.email "maestro@quant.com"
-          git add predictions_history.csv
-          git commit -m "Update Global History [skip ci]" || echo "No changes"
-          git push
+      - name: Guardar memoria de partidos procesados
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "🤖 Bot: Memoria de partidos actualizada"
+          file_pattern: data/procesados.txt
