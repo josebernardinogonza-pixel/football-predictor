@@ -33,3 +33,8 @@
 2026-04-12_Blue_Jays_Twins
 2026-04-12_Reds_Angels
 2026-04-12_Mets_Athletics
+2026-04-12_Tigers_Marlins
+2026-04-12_Rays_Yankees
+2026-04-12_Royals_White_Sox
+2026-04-12_Brewers_Nationals
+2026-04-12_Cardinals_Red_Sox
