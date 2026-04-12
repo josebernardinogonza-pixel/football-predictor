@@ -1,0 +1,41 @@
+name: Edge Bot Pro Automático
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Se ejecuta en el minuto 0 de CADA HORA
+  workflow_dispatch:
+
+permissions:
+  contents: write # Permiso vital para que el bot pueda guardar su memoria
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Generar archivo de aprendizaje
+        run: python data/aprendizaje.py
+
+      - name: Ejecutar Edge Bot Pro
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot.py
+
+      - name: Guardar memoria de partidos procesados
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "🤖 Bot: Memoria de partidos actualizada"
+          file_pattern: data/procesados.txt
