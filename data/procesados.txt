@@ -18,3 +18,8 @@
 2026-04-12_Crystal_Palace_Newcastle_United
 2026-04-12_Nottingham_Forest_Aston_Villa
 2026-04-12_Sunderland_Tottenham_Hotspur
+2026-04-12_Chelsea_Manchester_City
+2026-04-12_Mallorca_Rayo_Vallecano
+2026-04-12_Celta_Vigo_Real_Oviedo
+2026-04-12_Athletic_Club_Villarreal
+2026-04-12_Bologna_Lecce
