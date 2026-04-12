@@ -3,3 +3,8 @@
 2026-04-12_Pacers_Pistons
 2026-04-12_Heat_Hawks
 2026-04-12_Knicks_Hornets
+2026-04-12_76ers_Bucks
+2026-04-12_Raptors_Nets
+2026-04-12_Mavericks_Bulls
+2026-04-12_Rockets_Grizzlies
+2026-04-12_Timberwolves_Pelicans
