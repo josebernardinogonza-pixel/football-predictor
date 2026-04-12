@@ -17,15 +17,15 @@ def actualizar_historial_aprendizaje():
 - [Extreme Altitude]: Multiplicar xGA del visitante por 1.35 en la 2da mitad en altitud (Ej: Pachuca, Toluca).
 
 ### REGLAS DE LIGAS DOMÉSTICAS Y DEPORTES AMERICANOS
--[Anti-Underdog Trap]: PROHIBIDO recomendar visitantes underdogs en ligas con alta disparidad económica.
+- [Anti-Underdog Trap]: PROHIBIDO recomendar visitantes underdogs en ligas con alta disparidad económica.
 - [Elite Roster Home Protection]: Penalizar picks en contra de equipos de Súper Élite en casa.
-- [Playoff Seeding Motivation]: En NBA/MLB al final de temporada, potenciar a equipos peleando por playoffs vs eliminados.
+-[Playoff Seeding Motivation]: En NBA/MLB al final de temporada, potenciar a equipos peleando por playoffs vs eliminados.
 
 ### NUEVAS REGLAS TRAS AUDITORÍA DEL 11 DE ABRIL (CRÍTICAS)
 
 ### Evento A: Éxito Absoluto en Liga MX (Tigres 4-1, Pachuca 4-2, América 1-1)
 - Lección Extraída: El modelo está perfectamente calibrado para México. La regla de altitud (Pachuca) y la detección de EV negativo (América -0.01) funcionaron a la perfección para evitar trampas.
-- Regla a Aplicar [Liga MX Confidence]: Mantener máxima confianza algorítmica en locales de Liga MX con EV positivo. Buscar siempre el Over de goles como Pick Secundario en partidos de altitud.
+- Regla a Aplicar[Liga MX Confidence]: Mantener máxima confianza algorítmica en locales de Liga MX con EV positivo. Buscar siempre el Over de goles como Pick Secundario en partidos de altitud.
 
 ### Evento B: Arsenal 1 - 2 Bournemouth (Premier League)
 - Lección Extraída: Un equipo de Súper Élite perdió en casa ante un rival inferior en el mes de abril. Esto ocurre por rotaciones masivas previas/posteriores a los Cuartos de Final de la Champions League.
