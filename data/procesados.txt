@@ -38,3 +38,8 @@
 2026-04-12_Royals_White_Sox
 2026-04-12_Brewers_Nationals
 2026-04-12_Cardinals_Red_Sox
+2026-04-12_Cubs_Pirates
+2026-04-12_Padres_Rockies
+2026-04-12_Mariners_Astros
+2026-04-12_Dodgers_Rangers
+2026-04-12_Braves_Guardians
