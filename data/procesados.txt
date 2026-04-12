@@ -8,3 +8,8 @@
 2026-04-12_Mavericks_Bulls
 2026-04-12_Rockets_Grizzlies
 2026-04-12_Timberwolves_Pelicans
+2026-04-12_Thunder_Suns
+2026-04-12_Spurs_Nuggets
+2026-04-12_Lakers_Jazz
+2026-04-12_Clippers_Warriors
+2026-04-12_Trail_Blazers_Kings
