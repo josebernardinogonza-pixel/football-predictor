@@ -23,3 +23,8 @@
 2026-04-12_Celta_Vigo_Real_Oviedo
 2026-04-12_Athletic_Club_Villarreal
 2026-04-12_Bologna_Lecce
+2026-04-12_Como_Internazionale
+2026-04-12_VfB_Stuttgart_Hamburg_SV
+2026-04-12_Mainz_SC_Freiburg
+2026-04-12_Nice_Le_Havre_AC
+2026-04-12_Toulouse_Lille
