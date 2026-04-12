@@ -28,3 +28,8 @@
 2026-04-12_Mainz_SC_Freiburg
 2026-04-12_Nice_Le_Havre_AC
 2026-04-12_Toulouse_Lille
+2026-04-12_Phillies_Diamondbacks
+2026-04-12_Orioles_Giants
+2026-04-12_Blue_Jays_Twins
+2026-04-12_Reds_Angels
+2026-04-12_Mets_Athletics
