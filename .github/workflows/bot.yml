@@ -25,13 +25,15 @@ jobs:
       - name: 3. Install Libs
         run: pip install numpy scipy requests Pillow
 
+      # ... (Pasos anteriores)
       - name: 4. Run Cerebro
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          STAKE_API_KEY: ${{ secrets.STAKE_API_KEY }} # LLAVE DIRECTA
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ALL_SPORTS_API_KEY: ${{ secrets.ALL_SPORTS_API_KEY }}
         run: python bot.py
+# ... (Pasos siguientes)
 
       - name: 5. Enviar Telegram
         run: |
