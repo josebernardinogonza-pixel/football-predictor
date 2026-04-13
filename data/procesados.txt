@@ -43,3 +43,6 @@
 2026-04-12_Mariners_Astros
 2026-04-12_Dodgers_Rangers
 2026-04-12_Braves_Guardians
+2026-04-13_Manchester_United_Leeds_United
+2026-04-13_Levante_Getafe
+2026-04-13_Fiorentina_Lazio
