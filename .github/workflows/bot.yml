@@ -1,41 +1,45 @@
-name: Edge Bot Pro Automático
+name: Bot de Apuestas (Ejecucion 10 AM CDMX)
 
 on:
+  workflow_dispatch: # Ejecución manual
   schedule:
-    - cron: '0 * * * *' # Se ejecuta en el minuto 0 de CADA HORA
-  workflow_dispatch:
-
-permissions:
-  contents: write # Permiso vital para que el bot pueda guardar su memoria
+    # Se ejecuta todos los días a las 16:00 UTC (10:00 AM CDMX)
+    - cron: '0 16 * * *'
+    # Mantenemos las ejecuciones de fin de semana cada 5 horas para captar en vivo
+    - cron: '0 */5 * * 5,6,0'
 
 jobs:
-  run-bot:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      - name: Clonar el repositorio
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - name: Configurar Python
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.9'
 
-      - name: Instalar dependencias
-        run: pip install -r requirements.txt
+      - name: Install Deps
+        run: pip install numpy scipy requests Pillow betfairlightweight
 
-      - name: Generar archivo de aprendizaje
-        run: python data/aprendizaje.py
-
-      - name: Ejecutar Edge Bot Pro
+      - name: Run Cerebro Inteligente
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
+          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
+          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py
 
-      - name: Guardar memoria de partidos procesados
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "🤖 Bot: Memoria de partidos actualizada"
-          file_pattern: data/procesados.txt
+      - name: Sync History
+        run: |
+          git config --global user.name "BotMaestro-AI"
+          git config --global user.email "maestro@quant.com"
+          git add data/
+          git commit -m "Update Learning Data [skip ci]" || echo "No changes"
+          git push
