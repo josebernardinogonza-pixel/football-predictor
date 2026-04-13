@@ -26,20 +26,19 @@ jobs:
       - name: Install Deps
         run: pip install numpy scipy requests Pillow betfairlightweight
 
-      - name: Run Cerebro Inteligente
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
-          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
-          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py
-
-      - name: Sync History
+      - name: Sync History (Blindado)
         run: |
           git config --global user.name "BotMaestro-AI"
           git config --global user.email "maestro@quant.com"
-          git add data/
-          git commit -m "Update Learning Data [skip ci]" || echo "No changes"
-          git push
+          
+          # 1. Intentar descargar cambios remotos para estar al día
+          git pull --rebase origin main
+          
+          # 2. Añadir los archivos generados por el bot
+          git add data/ predictions_history.csv audit_report.txt || echo "No hay archivos nuevos"
+          
+          # 3. Hacer el commit (si hay cambios)
+          git commit -m "Update Learning Data [skip ci]" || echo "No hay cambios para guardar"
+          
+          # 4. Empujar los cambios con un rebase final por seguridad
+          git push origin main
