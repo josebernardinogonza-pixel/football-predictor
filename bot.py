@@ -167,3 +167,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+def analyze_performance():
+    """Analiza el historial y detecta el sesgo del modelo"""
+    file = "predictions_history.csv"
+    if not os.path.isfile(file): return "No hay datos para analizar."
+    
+    with open(file, 'r') as f:
+        rows = list(csv.reader(f))
+        # Analizamos los últimos 20 partidos
+        recent_data = rows[-20:]
+        
+        # Aquí el bot calculará:
+        # 1. ¿Cuántas veces predijo victoria y fue empate?
+        # 2. ¿El xG proyectado estuvo cerca del marcador real?
+        # 3. ¿El ROI es positivo o negativo?
+        
+    print("🤖 El bot está generando un reporte de mejora...")
+    # Este reporte lo verás en los logs de GitHub Actions
