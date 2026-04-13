@@ -1,44 +1,76 @@
-name: Bot de Apuestas (Ejecucion 10 AM CDMX)
+name: Bot de Apuestas Inteligente
 
 on:
-  workflow_dispatch: # Ejecución manual
+  workflow_dispatch: # Permite ejecutarlo manualmente desde el móvil
   schedule:
-    # Se ejecuta todos los días a las 16:00 UTC (10:00 AM CDMX)
+    # Lunes a Domingo: 10:00 AM CDMX (16:00 UTC)
     - cron: '0 16 * * *'
-    # Mantenemos las ejecuciones de fin de semana cada 5 horas para captar en vivo
+    # Viernes a Domingo: Ejecución extra cada 5 horas para captar juegos en vivo
     - cron: '0 */5 * * 5,6,0'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # PERMISO CRÍTICO PARA GUARDAR EL HISTORIAL
 
     steps:
-      - name: Checkout
+      - name: 1. Descargar Codigo
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Descarga todo el historial para evitar errores de git
 
-      - name: Setup Python
+      - name: 2. Configurar Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install Deps
-        run: pip install numpy scipy requests Pillow betfairlightweight
+      - name: 3. Instalar Librerias
+        run: |
+          pip install numpy scipy requests Pillow betfairlightweight
 
-      - name: Sync History (Blindado)
+      - name: 4. Ejecutar Cerebro del Bot
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
+          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
+          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALL_SPORTS_API_KEY: ${{ secrets.ALL_SPORTS_API_KEY }}
+        run: python bot.py
+
+      - name: 5. Enviar Reporte a Telegram
+        run: |
+          if [ -f audit_report.txt ]; then
+            REPORT=$(cat audit_report.txt)
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+              --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+              --data-urlencode "text=$REPORT" \
+              -d parse_mode="HTML"
+          fi
+
+      - name: 6. Enviar Cartelera a Telegram
+        run: |
+          if [ -f prediction_card.png ]; then
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
+              -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+              -F photo=@prediction_card.png \
+              -F caption="🚨 <b>NUEVA CARTELERA DE INVERSIÓN</b>" \
+              -F parse_mode="HTML"
+          fi
+
+      - name: 7. Sincronizar Memoria (Fix Rebase)
         run: |
           git config --global user.name "BotMaestro-AI"
           git config --global user.email "maestro@quant.com"
           
-          # 1. Intentar descargar cambios remotos para estar al día
+          # Sincronizar con cambios remotos antes de subir
           git pull --rebase origin main
           
-          # 2. Añadir los archivos generados por el bot
-          git add data/ predictions_history.csv audit_report.txt || echo "No hay archivos nuevos"
+          # Añadir archivos de datos y el historial
+          git add data/ predictions_history.csv || echo "No hay archivos nuevos"
           
-          # 3. Hacer el commit (si hay cambios)
+          # Hacer commit y push
           git commit -m "Update Learning Data [skip ci]" || echo "No hay cambios para guardar"
-          
-          # 4. Empujar los cambios con un rebase final por seguridad
           git push origin main
