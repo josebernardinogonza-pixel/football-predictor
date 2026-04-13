@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 16 * * *' # 10:00 AM CDMX
-    - cron: '0 */5 * * 5,6,0' # Fines de semana cada 5h
 
 jobs:
   build:
@@ -13,31 +12,28 @@ jobs:
       contents: write
 
     steps:
-      - name: 1. Descargar Repositorio
+      - name: 1. Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: 2. Configurar Python
+      - name: 2. Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 3. Instalar Librerias
-        run: pip install numpy scipy requests Pillow betfairlightweight
+      - name: 3. Install Libs
+        run: pip install numpy scipy requests Pillow
 
-      - name: 4. Ejecutar Cerebro
+      - name: 4. Run Cerebro
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
-          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
-          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ALL_SPORTS_API_KEY: ${{ secrets.ALL_SPORTS_API_KEY }}
         run: python bot.py
 
-      - name: 5. Enviar Reporte
+      - name: 5. Enviar Telegram
         run: |
           if [ -f audit_report.txt ]; then
             REPORT=$(cat audit_report.txt)
@@ -46,22 +42,29 @@ jobs:
               --data-urlencode "text=$REPORT" \
               -d parse_mode="HTML"
           fi
-
-      - name: 6. Enviar Cartelera
-        run: |
           if [ -f prediction_card.png ]; then
             curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendPhoto \
               -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
               -F photo=@prediction_card.png \
-              -F caption="🚨 <b>NUEVA CARTELERA DE INVERSIÓN</b>" \
               -F parse_mode="HTML"
           fi
 
-      - name: 7. Sincronizar Memoria (Fix Rebase)
+      - name: 6. Sincronizar Memoria (FIX 128)
         run: |
           git config --global user.name "BotMaestro-AI"
           git config --global user.email "maestro@quant.com"
+          
+          # Guardar cambios locales temporalmente
+          git add .
+          git stash
+          
+          # Bajar cambios remotos
           git pull --rebase origin main
-          git add data/ predictions_history.csv || echo "No changes"
+          
+          # Recuperar cambios del bot
+          git stash pop || echo "No hay cambios en stash"
+          
+          # Subir todo
+          git add .
           git commit -m "Update Learning Data [skip ci]" || echo "No changes"
           git push origin main
