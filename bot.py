@@ -4,92 +4,99 @@ import numpy as np
 from scipy.stats import poisson
 from PIL import Image, ImageDraw
 import csv
-import json
 from datetime import datetime
 
 # --- CONFIGURACIÓN ---
-BANKROLL_MXN = 21830.00  
+STAKE_API_KEY = os.getenv("STAKE_API_KEY")
+STAKE_URL = "https://api.stake.com/graphql" # Endpoint oficial de Stake
+BANKROLL_MXN = 21830.00
 KELLY_FRACTION = 0.15
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-API_KEY = os.getenv("ALL_SPORTS_API_KEY") # Tu llave de AllSportsApi.com
 
-os.makedirs("data", exist_ok=True)
-HISTORIAL_PATH = "data/predictions_history.csv"
-CONFIG_IA_PATH = "data/config_ia.json"
-
-def get_today_matches():
-    """Obtiene partidos reales de hoy desde la API"""
-    hoy_str = datetime.now().strftime("%Y-%m-%d")
-    url = f"https://apiv2.allsportsapi.com/football/?met=Fixtures&APIkey={API_KEY}&from={hoy_str}&to={hoy_str}"
+def get_direct_stake_odds():
+    """Consulta cuotas de fútbol directamente en Stake.com usando GraphQL"""
+    # Esta es la consulta técnica que entiende el servidor de Stake
+    query = """
+    {
+      activeSports(sport: "soccer") {
+        groups {
+          events {
+            name
+            id
+            specifiers
+            markets(names: ["winner"]) {
+              outcomes {
+                name
+                value
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    headers = {
+        "x-access-token": STAKE_API_KEY,
+        "Content-Type": "application/json"
+    }
+    
     try:
-        res = requests.get(url).json()
-        if "result" in res:
-            # Filtramos solo ligas importantes para no saturar
-            top_leagues = ["Liga MX", "Premier League", "LaLiga", "Serie A", "Bundesliga"]
-            matches = []
-            for m in res["result"]:
-                if m["league_name"] in top_leagues:
-                    matches.append({
-                        "match": f"{m['event_home_team']} vs {m['event_away_team']}",
-                        "h": 1.8, "a": 1.2, # xG base (la IA lo ajustará)
-                        "cuota": 2.00,
-                        "liga": m["league_name"]
+        response = requests.post(STAKE_URL, json={'query': query}, headers=headers)
+        data = response.json()
+        
+        odds_results = []
+        # Navegamos por la estructura de datos de Stake
+        for group in data['data']['activeSports'][0]['groups']:
+            for event in group['events']:
+                try:
+                    match_name = event['name']
+                    # Extraer cuota del local (Home)
+                    h_odds = event['markets'][0]['outcomes'][0]['value']
+                    odds_results.append({
+                        "match": match_name,
+                        "cuota": float(h_odds)
                     })
-            return matches[:6] # Top 6 del día
+                except: continue
+        return odds_results
+    except Exception as e:
+        print(f"Error conectando a Stake: {e}")
         return []
-    except: return []
 
-def get_config():
-    default = {"MIN_EV": 0.07, "ADJUST": 1.10}
-    if os.path.exists(CONFIG_IA_PATH):
-        with open(CONFIG_IA_PATH, "r") as f:
-            return {**default, **json.load(f)}
-    return default
-
-def predict_match(h_xg, a_xg, cuota, config):
-    adj = config.get("ADJUST", 1.10)
-    prob_l = np.sum(np.tril(np.outer(poisson.pmf(range(10), h_xg*adj), poisson.pmf(range(10), a_xg)), -1))
+def predict_and_save(match_data):
+    """Aplica Poisson y guarda en el historial"""
+    h_xg, a_xg = 1.8, 1.2 # xG base
+    cuota = match_data['cuota']
+    
+    prob_l = np.sum(np.tril(np.outer(poisson.pmf(range(10), h_xg), poisson.pmf(range(10), a_xg)), -1))
     ev = (prob_l * cuota) - 1
-    apuesta = round(ev * KELLY_FRACTION * BANKROLL_MXN, 2) if ev > config.get("MIN_EV", 0.07) else 0
-    return prob_l, ev, max(0, apuesta)
-
-def generate_card(picks):
-    img = Image.new('RGB', (1000, 1000), color=(10, 10, 15))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([0, 0, 1000, 100], fill="#D4AF37")
-    draw.text((500, 50), f"INVERSIÓN DIARIA - {datetime.now().strftime('%d/%m/%Y')}", fill="black", anchor="mm")
-    y = 150
-    for p in picks:
-        draw.rectangle([50, y, 950, y+120], outline="#D4AF37", width=2)
-        draw.text((80, y+30), f"{p['liga']}: {p['match']}", fill="white")
-        draw.text((80, y+70), f"PROB: {p['prob']:.1%} | STAKE: ${p['apuesta']} MXN", fill="#00FF00")
-        y += 150
-    img.save("prediction_card.png")
+    
+    apuesta = 0
+    if ev > 0.07:
+        f_star = ((cuota - 1) * prob_l - (1 - prob_l)) / (cuota - 1)
+        apuesta = round(f_star * KELLY_FRACTION * BANKROLL_MXN, 2)
+        
+    return {
+        "match": match_data['match'],
+        "prob": prob_l,
+        "cuota": cuota,
+        "apuesta": max(0, apuesta),
+        "ev": ev
+    }
 
 if __name__ == "__main__":
-    # 1. Inicializar archivos
-    with open("audit_report.txt", "w") as f: f.write("Analizando jornada...")
-    
-    # 2. Obtener partidos REALES de hoy
-    hoy_matches = get_today_matches()
-    config = get_config()
+    print("🛰️ Conectando directamente a Stake.com...")
+    partidos_stake = get_direct_stake_odds()
     
     final_picks = []
-    if hoy_matches:
-        for p in hoy_matches:
-            prob, ev, stake = predict_match(p['h'], p['a'], p['cuota'], config)
-            if stake > 0:
-                res = {**p, "prob": prob, "apuesta": stake}
-                final_picks.append(res)
-                with open(HISTORIAL_PATH, "a", newline="") as f:
-                    csv.writer(f).writerow([datetime.now().date(), p['match'], p['liga'], "Local", prob, 2.0, stake, "PENDIENTE"])
-        
-        if final_picks:
-            generate_card(final_picks)
-            with open("audit_report.txt", "w") as f:
-                f.write(f"<b>✅ JORNADA DETECTADA</b>\nSe encontraron {len(final_picks)} oportunidades de valor.")
+    for p in partidos_stake[:8]: # Analizamos los primeros 8
+        res = predict_and_save(p)
+        if res['apuesta'] > 0:
+            final_picks.append(res)
+            # Guardar en CSV
+            with open("data/predictions_history.csv", "a", newline="") as f:
+                csv.writer(f).writerow([datetime.now().date(), res['match'], "Stake Direct", "Local", res['prob'], res['cuota'], res['apuesta'], "PENDIENTE"])
+
+    if final_picks:
+        # (Aquí llamas a tu función de generar imagen que ya tienes)
+        print(f"✅ {len(final_picks)} oportunidades encontradas en Stake.")
     else:
-        with open("audit_report.txt", "w") as f:
-            f.write("<b>⏳ SIN ACTIVIDAD</b>\nNo hay partidos de ligas TOP hoy o la API está en mantenimiento.")
+        print("❌ No hay apuestas con valor en Stake ahora mismo.")
