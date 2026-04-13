@@ -1,156 +1,157 @@
 import os
 import requests
-import time
 import csv
-import json
+import time
 from datetime import datetime, timedelta
 
 # ==========================================
-# CONFIGURACIÓN
+# CONFIGURACIÓN DE ACCESO
 # ==========================================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-os.makedirs("data", exist_ok=True)
-
-# Mapeo de ligas para la API de ESPN
-LEAGUE_MAP = {
+# Ligas soportadas por ESPN
+LEAGUES = {
     "NBA": "basketball/nba",
     "MLB": "baseball/mlb",
-    "Liga MX": "soccer/mex.1",
-    "English Premier League": "soccer/eng.1",
-    "Spanish LaLiga": "soccer/esp.1",
-    "Italian Serie A": "soccer/ita.1",
-    "German Bundesliga": "soccer/ger.1",
-    "French Ligue 1": "soccer/fra.1"
+    "LIGA_MX": "soccer/mex.1",
+    "PREMIER_LEAGUE": "soccer/eng.1",
+    "LALIGA": "soccer/esp.1"
 }
 
-def leer_aprendizaje():
-    ruta = "data/aprendizaje.txt"
-    if os.path.exists(ruta):
-        with open(ruta, "r", encoding="utf-8") as f:
-            return f.read()[-2500:]
-    return "No hay datos previos. Sé conservador."
+os.makedirs("data", exist_ok=True)
+HISTORIAL_PATH = "data/predictions_history.csv"
+APRENDIZAJE_PATH = "data/aprendizaje.txt"
 
-def auditar_resultados():
-    """Busca resultados de partidos pendientes y actualiza el aprendizaje"""
-    ruta_csv = "data/predictions_history.csv"
-    if not os.path.exists(ruta_csv): return
+# ==========================================
+# 1. MÓDULO DE AUDITORÍA (VER ERRORES Y ACIERTOS)
+# ==========================================
+def auditar_y_aprender():
+    if not os.path.exists(HISTORIAL_PATH): return
     
-    print("🔍 Iniciando Auditoría Automática...")
+    print("🔍 Analizando aciertos y errores de ayer...")
     filas_actualizadas = []
-    aciertos = 0
-    fallos = 0
     lecciones = []
-
-    with open(ruta_csv, "r", encoding="utf-8") as f:
+    
+    with open(HISTORIAL_PATH, "r", encoding="utf-8") as f:
         reader = list(csv.reader(f))
         if len(reader) < 2: return
         header = reader[0]
+        
         for row in reader[1:]:
-            # row format: [ID, Fecha, Partido, Liga, Pick, Prob, Estado]
+            # row: [ID, Fecha, Partido, Liga, Pick, Prob, Estado]
             if row[6] == "PENDIENTE":
-                p_id, fecha, partido, liga, pick, prob, estado = row
-                resultado = buscar_marcador_espn(liga, fecha, partido)
-                
+                resultado = consultar_resultado_real(row[3], row[1], row[2])
                 if resultado != "PENDIENTE":
-                    # Lógica simple de validación
-                    ganador_real = resultado # "LOCAL", "VISITANTE" o "EMPATE"
-                    es_acierto = ganador_real in pick.upper()
-                    
-                    row[6] = "GANADA" if es_acierto else "PERDIDA"
-                    if es_acierto: aciertos += 1
-                    else: fallos += 1
-                    lecciones.append(f"Partido {partido}: {'Acierto' if es_acierto else 'Fallo'}. Predicción fue {pick}, resultado real {ganador_real}.")
-            
+                    es_acierto = resultado in row[4].upper()
+                    row[6] = "GANADA ✅" if es_acierto else "PERDIDA ❌"
+                    lecciones.append(f"Partido: {row[2]} | Predicción: {row[4]} | Real: {resultado} | {'LOGRADO' if es_acierto else 'ERROR'}")
             filas_actualizadas.append(row)
 
-    # Guardar CSV actualizado
-    with open(ruta_csv, "w", newline="", encoding="utf-8") as f:
+    # Guardar resultados
+    with open(HISTORIAL_PATH, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         writer.writerows(filas_actualizadas)
 
-    # Escribir en el diario de aprendizaje
+    # Escribir lecciones para que la IA las lea
     if lecciones:
-        with open("data/aprendizaje.txt", "a", encoding="utf-8") as f:
-            resumen = f"\n--- AUDITORÍA {datetime.now().date()} ---\n"
-            resumen += f"Resultado: {aciertos} aciertos, {fallos} fallos.\n"
-            resumen += "\n".join(lecciones) + "\n"
-            f.write(resumen)
-        print(f"✅ Auditoría finalizada: {aciertos}W - {fallos}L. Memoria actualizada.")
+        with open(APRENDIZAJE_PATH, "a", encoding="utf-8") as f:
+            f.write(f"\n--- SESIÓN DE APRENDIZAJE {datetime.now()} ---\n")
+            f.write("\n".join(lecciones) + "\n")
 
-def buscar_marcador_espn(liga_nombre, fecha_str, partido_nombre):
-    """Consulta la API de ESPN para obtener el ganador real"""
-    path = LEAGUE_MAP.get(liga_nombre)
-    if not path: return "PENDIENTE"
-    
-    # Formato fecha para ESPN: YYYYMMDD
-    date_api = fecha_str.replace("-", "")
-    url = f"https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard?dates={date_api}"
+def consultar_resultado_real(liga_key, fecha, partido_nombre):
+    path = LEAGUES.get(liga_key)
+    date_str = fecha.replace("-", "")
+    url = f"https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard?dates={date_str}"
     
     try:
-        data = requests.get(url, timeout=10).json()
+        data = requests.get(url).json()
         for event in data.get("events", []):
-            name = event.get("name", "")
-            if event["status"]["type"]["state"] == "post": # Solo partidos terminados
-                # Determinar ganador
-                teams = event["competitions"][0]["competitors"]
-                home = next(t for t in teams if t["homeAway"] == "home")
-                away = next(t for t in teams if t["homeAway"] == "away")
+            if event["status"]["type"]["state"] == "post":
+                teams = event["competitions[0]"]["competitors"]
+                h = next(t for t in teams if t["homeAway"] == "home")
+                a = next(t for t in teams if t["homeAway"] == "away")
                 
-                h_score = int(home["score"])
-                a_score = int(away["score"])
+                res = "EMPATE"
+                if int(h["score"]) > int(a["score"]): res = "LOCAL"
+                elif int(a["score"]) > int(h["score"]): res = "VISITANTE"
                 
-                ganador = "EMPATE"
-                if h_score > a_score: ganador = "LOCAL"
-                elif a_score > h_score: ganador = "VISITANTE"
-                
-                # Verificar si es el partido que buscamos (comparación simple de nombres)
-                if home["team"]["name"] in partido_nombre:
-                    return ganador
+                if h["team"]["name"] in partido_nombre: return res
     except: pass
     return "PENDIENTE"
 
-def analizar_con_ia(historial, partido_str):
+# ==========================================
+# 2. MÓDULO DE PREDICCIÓN (CONEXIÓN IA)
+# ==========================================
+def obtener_datos_ia(partido_str):
+    # Leer lo que aprendimos de los errores antes de predecir
+    aprendizaje = ""
+    if os.path.exists(APRENDIZAJE_PATH):
+        with open(APRENDIZAJE_PATH, "r") as f:
+            aprendizaje = f.read()[-3000:]
+
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     
-    prompt = f"""Eres EDGE BOT PRO. Analiza basándote en este aprendizaje previo:
-    {historial}
+    prompt = f"""[SISTEMA DE APRENDIZAJE ACTIVO]
+    Errores y aciertos previos: {aprendizaje}
     
-    Partido: {partido_str}
+    [PARTIDO A ANALIZAR]
+    {partido_str}
     
-    [REGLA] Si el pick es para el Local, incluye la palabra 'LOCAL'. Si es para el Visitante, 'VISITANTE'.
-    [FORMATO]
+    [INSTRUCCIÓN]
+    Analiza el partido. Si el valor es alto, responde APROBADO. Si no, DESCARTADO.
+    Usa 'LOCAL' o 'VISITANTE' para definir al ganador.
+    
+    Formato:
     🏟️ Partido: [Nombres]
-    🏆 Competición: [Liga]
-    🧠 Análisis: [Técnico corto]
-    🎯 Pick Principal: [LOCAL/VISITANTE/EMPATE + Mercado]
+    🎯 Pick: [LOCAL/VISITANTE + Mercado]
     📊 Probabilidad: [X%]
     ⚖️ Veredicto: [APROBADO/DESCARTADO]"""
 
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1
+        "temperature": 0.2
     }
+    
     try:
         res = requests.post(url, headers=headers, json=payload).json()
         return res["choices"][0]["message"]["content"]
     except: return "DESCARTADO"
 
+# ==========================================
+# 3. EJECUCIÓN PRINCIPAL
+# ==========================================
 def main():
-    print("🚀 EDGE BOT PRO: SISTEMA DE APRENDIZAJE ACTIVO")
+    # Primero: Aprender de los errores de ayer
+    auditar_y_aprender()
     
-    # 1. Aprender de lo que pasó ayer
-    auditar_resultados()
-    
-    # 2. Obtener nuevos partidos
-    historial = leer_aprendizaje()
-    # (Aquí llamarías a obtener_partidos_hoy() del código anterior)
-    # ... resto de la lógica de envío a Telegram ...
+    # Segundo: Buscar partidos de hoy
+    print("🚀 Escaneando cartelera de hoy...")
+    for liga_key, path in LEAGUES.items():
+        url = f"https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard"
+        try:
+            data = requests.get(url).json()
+            for event in data.get("events", []):
+                if event["status"]["type"]["state"] == "pre":
+                    p_str = event["name"]
+                    analisis = obtener_datos_ia(f"Liga: {liga_key} | Partido: {p_str}")
+                    
+                    if "APROBADO" in analisis.upper():
+                        # Enviar a Telegram
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                                     json={"chat_id": TELEGRAM_CHAT_ID, "text": f"🤖 <b>EDGE BOT PRO</b>\n{analisis}", "parse_mode": "HTML"})
+                        
+                        # Guardar en historial para auditar mañana
+                        with open(HISTORIAL_PATH, "a", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow([event["id"], datetime.now().date(), p_str, liga_key, analisis, "IA", "PENDIENTE"])
+                    
+                    time.sleep(2) # Evitar baneo de API
+        except: continue
 
 if __name__ == "__main__":
     main()
