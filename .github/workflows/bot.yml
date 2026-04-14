@@ -1,9 +1,9 @@
-name: Bot de Apuestas Inteligente
+name: Bot de Apuestas Real-Time
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 16 * * *' # 10:00 AM CDMX (16:00 UTC)
+    - cron: '0 16 * * *' # 10:00 AM CDMX
 
 jobs:
   build:
@@ -12,34 +12,34 @@ jobs:
       contents: write
 
     steps:
-      - name: 1. Descargar Repositorio
+      - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: 2. Configurar Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: 3. Instalar Librerias
+      - name: Install Deps
         run: pip install numpy scipy requests
 
-      - name: 4. Ejecutar Cerebro
+      - name: Run Cerebro
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py
 
-      - name: 5. Sincronizar Memoria (Fix Rebase)
+      - name: Sync Data
         run: |
           git config --global user.name "BotMaestro-AI"
           git config --global user.email "maestro@quant.com"
           git add .
-          git stash || echo "Nada que guardar"
+          git stash || echo "No changes"
           git pull --rebase origin main
-          git stash pop || echo "Nada que recuperar"
+          git stash pop || echo "No changes"
           git add .
-          git commit -m "Update Learning Data [skip ci]" || echo "Sin cambios"
+          git commit -m "Update Real Data [skip ci]" || echo "No changes"
           git push origin main
