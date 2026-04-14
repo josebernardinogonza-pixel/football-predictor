@@ -1,4 +1,4 @@
-name: Bot de Apuestas Real-Time 2026
+name: Bot de Apuestas Inteligente
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ jobs:
       - name: 3. Instalar Librerias
         run: pip install numpy scipy requests
 
-      - name: 4. Ejecutar Cerebro Quant
+      - name: 4. Ejecutar Cerebro
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -37,9 +37,9 @@ jobs:
           git config --global user.name "BotMaestro-AI"
           git config --global user.email "maestro@quant.com"
           git add .
-          git stash
+          git stash || echo "Nada que guardar"
           git pull --rebase origin main
-          git stash pop || echo "No changes"
+          git stash pop || echo "Nada que recuperar"
           git add .
-          git commit -m "Update Real-Time Data [skip ci]" || echo "No changes"
+          git commit -m "Update Learning Data [skip ci]" || echo "Sin cambios"
           git push origin main
