@@ -1,0 +1,36 @@
+name: opencode
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  opencode:
+    if: |
+      contains(github.event.comment.body, '/oc') || 
+      contains(github.event.comment.body, '/opencode')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run OpenCode
+        uses: anomalyco/opencode/github@latest
+        env:
+          # Necesitas una clave de Anthropic en tus Secrets si vas a usar Claude
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          model: anthropic/claude-3-5-sonnet-20240620
+          share: true
+          github_token: ${{ secrets.TOKEN_GITHUB }}
