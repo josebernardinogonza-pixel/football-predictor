@@ -2,7 +2,7 @@ name: Edge Bot Pro - Production Auto-Run
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Every hour
+    - cron: '0 * * * *'  # Cada hora
   workflow_dispatch:
   push:
     branches: [main]
@@ -13,10 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     
     env:
-      TELEGRAM_BOT_TOKEN: ${ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${ secrets.TELEGRAM_CHAT_ID }}
-      ODDS_API_KEY: ${ secrets.ODDS_API_KEY }}
-      GITHUB_TOKEN: ${ secrets.GITHUB_TOKEN }}
+      # Corregido: Faltaba el signo $ inicial en los secrets
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     steps:
       - uses: actions/checkout@v4
@@ -30,33 +31,45 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install PyGithub
+      
+      - name: Ensure Directories Exist
+        run: |
+          mkdir -p models data
       
       - name: Fetch Historical Data (if missing)
         run: |
-          if [ ! -f "data/match_history.csv" ] || [ $(wc -l < data/match_history.csv) < 100 ]; then
-            python data/fetch_historical.py
+          # Solo descarga si el archivo no existe o está vacío
+          if [ ! -s "data/match_history.csv" ]; then
+            python data/fetch_historical.py || echo "No se pudo obtener data histórica"
           fi
       
       - name: Train Models (Auto-Improvement)
         run: |
+          # Nota: Asegúrate de haber corregido el error de sintaxis en la línea 53 de training.py
           python training.py
       
       - name: Commit Models & Logs
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add models/*.pkl data/performance_log.csv
-          git commit -m "Auto: Models & Performance Log [$(date)]" || echo "No changes"
-          git push
+          
+          # Añade archivos solo si existen para evitar el error fatal de Git
+          if ls models/*.pkl 1> /dev/null 2>&1; then git add models/*.pkl; fi
+          if [ -f "data/performance_log.csv" ]; then git add data/performance_log.csv; fi
+          
+          # Commit solo si hay cambios detectados
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto: Models & Performance Log [$(date)]" && git push)
         env:
-          GITHUB_TOKEN: ${ env.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Run Bot (Predictions)
         run: python bot.py
       
       - name: Upload Performance Logs
+        if: always() # Se ejecuta aunque fallen pasos anteriores para que veas el log de error
         uses: actions/upload-artifact@v4
         with:
           name: performance-logs
