@@ -1,18 +1,17 @@
 """
-EDGE BOT PRO v3.2 - Entrenamiento Multi-Sport Optimizado
-Auto-Rolling Features (CSV/JSON) | TimeSeriesSplit | Ensemble Poisson + XGBoost + RF
+EDGE BOT PRO v3.3 - Entrenamiento Multi-Sport (SOLO DATOS REALES)
+TimeSeriesSplit Fixed | Sin Datos de Muestra | Producción
 """
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, classification_report
 import xgboost as xgb
 from scipy.stats import poisson
 import pickle
 import os
-import json
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -22,13 +21,26 @@ warnings.filterwarnings('ignore')
 ROLLING_WINDOWS = [5, 10]
 HOME_ADV_MX = 0.15
 MIN_REST_DAYS = 3
+DATA_PATH = 'data/match_history.csv'  # ← Cambiar por tu ruta real
 
 # ==========================================
-# CARGA DE DATOS (CSV/JSON)
+# CARGA DE DATOS (SOLO REALES - SIN FALLBACK)
 # ==========================================
 
-def load_data(filepath='data/match_history.csv'):
-    """Carga CSV o JSON automáticamente."""
+def load_real_data(filepath=DATA_PATH):
+    """
+    Carga SOLO datos reales desde CSV/JSON.
+    NO HAY FALLBACK - Falla si no existe.
+    """
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(
+            f"❌ ERROR CRÍTICO: Archivo no encontrado: {filepath}\n"
+            f"   Soluciones:\n"
+            f"   1. Descarga datos reales desde API/Scraping\n"
+            f"   2. Coloca un CSV en {filepath} con columnas:\n"
+            f"      date,team,opponent,is_home,scored,conceded,target,league"
+        )
+    
     try:
         if filepath.endswith('.csv'):
             df = pd.read_csv(filepath)
@@ -36,147 +48,98 @@ def load_data(filepath='data/match_history.csv'):
             df = pd.read_json(filepath)
         else:
             raise ValueError("Formato no soportado: usa CSV o JSON")
-        print(f"✅ Datos cargados: {len(df)} filas desde {filepath}")
-        if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        
+        # Validar columnas requeridas
+        required_cols = ['date', 'team', 'opponent', 'is_home', 'scored', 'conceded', 'target', 'league']
+        missing_cols = set(required_cols) - set(df.columns)
+        if missing_cols:
+            raise ValueError(f"Faltan columnas: {missing_cols}")
+        
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df = df.dropna(subset=['date', 'team', 'opponent', 'target'])
+        
+        print(f"✅ Datos REALES cargados: {len(df)} filas desde {filepath}")
+        print(f"   Ligas: {df['league'].unique()}")
+        print(f"   Rango: {df['date'].min()} a {df['date'].max()}")
+        
         return df
-    except FileNotFoundError:
-        print("⚠️ Archivo no encontrado → Generando datos de muestra")
-        return generate_sample_data()
+    
     except Exception as e:
-        print(f"Error loading {filepath}: {e} → Generando datos de muestra")
-        return generate_sample_data()
-
-def generate_sample_data(sport='soccer', n_samples=2000):
-    """Genera datos históricos realistas por deporte."""
-    dates = pd.date_range('2020-01-01', periods=n_samples, freq='2D')
-    
-    if sport == 'soccer':
-        leagues = ['Premier League', 'LaLiga', 'Serie A', 'Bundesliga', 'Ligue 1', 'Liga MX']
-        teams = [f'Team{i}' for i in range(20)]
-        scored_lambda, conceded_lambda = 1.4, 1.2
-        data = {
-            'date': dates,
-            'league': np.random.choice(leagues, n_samples),
-            'team': [teams[i % 20] for i in range(n_samples)],
-            'opponent': [teams[(i + 1) % 20] for i in range(n_samples)],
-            'is_home': np.random.choice([0, 1], n_samples),
-            'scored': np.random.poisson(scored_lambda, n_samples),
-            'conceded': np.random.poisson(conceded_lambda, n_samples),
-        }
-        data['target'] = np.where(data['scored'] > data['conceded'], 0,
-                                  np.where(data['scored'] == data['conceded'], 1, 2))
-    elif sport == 'nba':
-        teams = [f'NBA_Team{i}' for i in range(30)]
-        data = {
-            'date': dates, 'league': ['NBA'] * n_samples,
-            'team': [teams[i % 30] for i in range(n_samples)],
-            'opponent': [teams[(i + 1) % 30] for i in range(n_samples)],
-            'is_home': np.random.choice([0, 1], n_samples),
-            'scored': np.random.poisson(110, n_samples),
-            'conceded': np.random.poisson(108, n_samples),
-        }
-        data['target'] = np.where(data['scored'] > data['conceded'], 0, 2)
-    elif sport == 'mlb':
-        teams = [f'MLB_Team{i}' for i in range(30)]
-        data = {
-            'date': dates, 'league': ['MLB'] * n_samples,
-            'team': [teams[i % 30] for i in range(n_samples)],
-            'opponent': [teams[(i + 1) % 30] for i in range(n_samples)],
-            'is_home': np.random.choice([0, 1], n_samples),
-            'scored': np.random.poisson(4.6, n_samples),
-            'conceded': np.random.poisson(4.4, n_samples),
-        }
-        data['target'] = np.where(data['scored'] > data['conceded'], 0, 2)
-    else:
-        raise ValueError(f"Deporte no soportado: {sport}")
-    
-    df = pd.DataFrame(data).sort_values('date')
-    return df
+        raise RuntimeError(f"Error procesando {filepath}: {e}")
 
 # ==========================================
 # INGENIERÍA DE FEATURES (AUTO-ROLLING)
 # ==========================================
 
 def compute_rolling_features(df, windows=ROLLING_WINDOWS):
-    """Calcula promedios móviles para team y opponent."""
+    """Calcula promedios móviles (team + opponent)."""
     print("🔄 Computando rolling averages...")
     df = df.sort_values(['team', 'date']).copy()
     
     for w in windows:
-        # Team perspective: goles anotados/concedidos por el equipo
+        # Team stats
         df[f'scored_rolling_{w}'] = (
             df.groupby('team')['scored']
-            .rolling(w, min_periods=1)
-            .mean()
-            .reset_index(0, drop=True)
-            .shift(1)  # Evitar data leakage
+            .rolling(w, min_periods=1).mean()
+            .reset_index(0, drop=True).shift(1)
         )
         df[f'conceded_rolling_{w}'] = (
             df.groupby('team')['conceded']
-            .rolling(w, min_periods=1)
-            .mean()
-            .reset_index(0, drop=True)
-            .shift(1)
+            .rolling(w, min_periods=1).mean()
+            .reset_index(0, drop=True).shift(1)
         )
-        # Opponent perspective: lo que el oponente anotó/recibió
+        # Opponent stats (perspectiva inversa)
         df[f'opponent_scored_rolling_{w}'] = (
             df.groupby('opponent')['conceded']
-            .rolling(w, min_periods=1)
-            .mean()
-            .reset_index(0, drop=True)
-            .shift(1)
+            .rolling(w, min_periods=1).mean()
+            .reset_index(0, drop=True).shift(1)
         )
         df[f'opponent_conceded_rolling_{w}'] = (
             df.groupby('opponent')['scored']
-            .rolling(w, min_periods=1)
-            .mean()
-            .reset_index(0, drop=True)
-            .shift(1)
+            .rolling(w, min_periods=1).mean()
+            .reset_index(0, drop=True).shift(1)
         )
     
-    df.fillna(0, inplace=True)  # Manejo de NaN iniciales
+    df.fillna(0, inplace=True)
     print("✅ Rolling computados + NaN → 0")
     return df
 
 def ensure_rolling_features(df):
-    """Verifica y crea columnas rolling si no existen."""
+    """Auto-verifica y crea si faltan."""
     required = [f'{base}_rolling_{w}' 
                 for w in ROLLING_WINDOWS 
                 for base in ['scored', 'conceded', 'opponent_scored', 'opponent_conceded']]
     missing = set(required) - set(df.columns)
     
     if missing:
-        print(f"🔧 Creando {len(missing)} columnas faltantes: {missing}")
+        print(f"🔧 Creando {len(missing)} columnas rolling...")
         df = compute_rolling_features(df)
     else:
         print("✅ Columnas rolling ya existen")
     return df
 
 def prepare_features(df, sport):
-    """Prepara todas las features para el modelo."""
+    """Prepara features completas."""
     df = df.copy()
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     
-    # Auto-computar rolling si faltan
+    # Auto-rolling
     df = ensure_rolling_features(df)
     
-    # Días de descanso
+    # Rest days
     df = df.sort_values(['team', 'date'])
     df['last_match'] = df.groupby('team')['date'].shift(1)
     df['rest_days'] = (df['date'] - df['last_match']).dt.days.fillna(MIN_REST_DAYS)
     df['rest_diff'] = df['rest_days'].fillna(MIN_REST_DAYS) - MIN_REST_DAYS
-    
-    # Ventaja por descanso
     df['rest_advantage'] = (df['rest_days'] >= MIN_REST_DAYS).astype(float) * 0.1
     
-    # Liga MX detection + home advantage
+    # Liga MX boost
     df['is_liga_mx'] = df['league'].astype(str).str.contains('MX|mx', na=False).astype(int)
     df['home_advantage'] = df['is_home'] * (
         HOME_ADV_MX * df['is_liga_mx'] + 0.10 * (1 - df['is_liga_mx'])
     )
     
-    # Diferencia de fortaleza entre equipos
+    # Strength deltas
     for w in ROLLING_WINDOWS:
         df[f'strength_diff_{w}'] = (
             (df[f'scored_rolling_{w}'] - df[f'conceded_rolling_{w}']) -
@@ -191,15 +154,11 @@ def prepare_features(df, sport):
 # ==========================================
 
 class PoissonGoalModel:
-    """Modelo de Poisson para distribución de goles/puntos."""
-    
     def fit(self, df):
         self.avg_scored = df['scored'].mean()
-        self.avg_conceded = df['conceded'].mean()
         return self
     
     def calculate_1x2_prob(self, h_lambda, a_lambda, max_g=10):
-        """Calcula probabilidades 1X2 usando Poisson."""
         home_p = np.array([poisson.pmf(i, h_lambda) for i in range(max_g)])
         away_p = np.array([poisson.pmf(i, a_lambda) for i in range(max_g)])
         
@@ -208,15 +167,8 @@ class PoissonGoalModel:
         p_away = 1 - p_home - p_draw
         
         return np.array([p_home, p_draw, p_away])
-    
-    def calculate_ml_prob(self, h_lambda, a_lambda):
-        """Calcula probabilidad simple (NBA/MLB - sin empate)."""
-        p_home = 1 - poisson.cdf(0, h_lambda)
-        return np.array([p_home, 1 - p_home])
 
 class MultiSportEnsemble:
-    """Ensamble Poisson + XGBoost + RandomForest."""
-    
     def __init__(self, sport):
         self.sport = sport
         self.n_classes = 3 if sport == 'soccer' else 2
@@ -233,7 +185,7 @@ class MultiSportEnsemble:
     def fit(self, df):
         df_feat = prepare_features(df, self.sport)
         
-        # Definir columnas de features
+        # Definir features ML
         self.feature_cols = [
             col for col in df_feat.columns 
             if any(kw in col.lower() for kw in ['rolling', 'advantage', 'rest', 'strength'])
@@ -254,41 +206,51 @@ class MultiSportEnsemble:
         return self
     
     def predict_proba(self, df_input):
+        """
+        ⚠️ FIX CRÍTICO: Retorna (n_samples, n_classes) no (1, n_classes)
+        """
         if self.feature_cols is None:
-            raise ValueError("Modelo no entrenado. Ejecuta fit() primero.")
+            raise ValueError("Modelo no entrenado")
         
-        # Asegurar que todas las columnas existan
+        # Asegurar columnas
         for col in self.feature_cols:
             if col not in df_input.columns:
                 df_input[col] = 0
         
         X_ml = df_input[self.feature_cols].fillna(0)
-        probs_ml = (self.xgb.predict_proba(X_ml) + self.rf.predict_proba(X_ml)) / 2
         
-        # Poisson approximation
+        # ✅ CORRECCIÓN: predict_proba retorna (n_samples, n_classes)
+        probs_xgb = self.xgb.predict_proba(X_ml)  # Shape: (n_samples, n_classes)
+        probs_rf = self.rf.predict_proba(X_ml)    # Shape: (n_samples, n_classes)
+        probs_ml = (probs_xgb + probs_rf) / 2     # Shape: (n_samples, n_classes)
+        
+        # Poisson approx (broadcast a todas las filas)
         h_lambda = df_input.get('scored_rolling_5', pd.Series([1.4])).mean()
         a_lambda = df_input.get('opponent_scored_rolling_5', pd.Series([1.2])).mean()
         
         if self.sport == 'soccer':
             poisson_p = self.poisson.calculate_1x2_prob(h_lambda, a_lambda)
-            # Asegurar misma dimensión
-            poisson_p = poisson_p[:self.n_classes]
         else:
-            poisson_p = self.poisson.calculate_ml_prob(h_lambda, a_lambda)
+            p_home = 1 - poisson.cdf(0, h_lambda)
+            poisson_p = np.array([p_home, 1 - p_home])
         
-        # Combinar ensamble (40% Poisson, 60% ML)
-        ensemble = 0.4 * poisson_p + 0.6 * probs_ml.mean(axis=0)
+        # Broadcast Poisson a n_samples
+        poisson_p_broadcast = np.tile(poisson_p[:self.n_classes], (len(X_ml), 1))
         
-        # Normalizar
-        ensemble = ensemble / ensemble.sum()
-        return ensemble.reshape(1, -1)
+        # Ensamble
+        ensemble = 0.4 * poisson_p_broadcast + 0.6 * probs_ml
+        ensemble = ensemble / ensemble.sum(axis=1, keepdims=True)
+        
+        return ensemble  # ✅ Shape: (n_samples, n_classes)
 
 # ==========================================
-# VALIDACIÓN (TIMESERIES SPLIT)
+# VALIDACIÓN CORREGIDA (TIMESERIES SPLIT)
 # ==========================================
 
 def time_series_validation(df, sport, n_splits=5):
-    """Validación cronológica sin data leakage."""
+    """
+    ✅ FIX CRÍTICO: predict_proba ahora retorna (n_test, n_classes)
+    """
     tscv = TimeSeriesSplit(n_splits=n_splits)
     df_feat = prepare_features(df, sport)
     
@@ -304,31 +266,60 @@ def time_series_validation(df, sport, n_splits=5):
     model = MultiSportEnsemble(sport)
     accs = []
     
-    for train_idx, test_idx in tscv.split(X):
+    print(f"\n{'='*60}")
+    print(f"VALIDACIÓN TIMESERIES - {sport.upper()}")
+    print(f"{'='*60}")
+    
+    for fold, (train_idx, test_idx) in enumerate(tscv.split(X)):
+        # Entrenar con fold
         model.fit(df.iloc[train_idx])
-        pred = model.predict_proba(X.iloc[test_idx])
-        accs.append(accuracy_score(y.iloc[test_idx], np.argmax(pred, axis=1)))
+        
+        # ✅ CORRECCIÓN: predict_proba retorna (n_test, n_classes)
+        X_test = X.iloc[test_idx]
+        pred_probs = model.predict_proba(X_test)  # Shape: (n_test, n_classes)
+        
+        # np.argmax ahora funciona correctamente
+        y_pred = np.argmax(pred_probs, axis=1)    # Shape: (n_test,)
+        y_true = y.iloc[test_idx].values          # Shape: (n_test,)
+        
+        acc = accuracy_score(y_true, y_pred)
+        accs.append(acc)
+        
+        print(f"Fold {fold+1}: Train={len(train_idx)}, Test={len(test_idx)}, Acc={acc:.4f}")
     
     mean_acc = np.mean(accs)
     std_acc = np.std(accs)
-    print(f"📊 {sport.upper()} TS Acc: {mean_acc:.3f} (+/- {std_acc:.3f})")
+    
+    print(f"{'='*60}")
+    print(f"📊 Accuracy Promedio: {mean_acc:.4f} (+/- {std_acc:.4f})")
+    print(f"{'='*60}\n")
+    
     return mean_acc
 
 # ==========================================
 # ENTRENAMIENTO PRINCIPAL
 # ==========================================
 
-def train_model(sport, data_path='data/match_history.csv', save_path='models'):
-    """Entrena y guarda modelo por deporte."""
-    print(f"\n🏁 Entrenando {sport.upper()}...")
+def train_model(sport, data_path=DATA_PATH, save_path='models'):
+    """Entrena modelo con datos REALES."""
+    print(f"\n🏁 Entrenando {sport.upper()} con datos REALES...")
     
-    # Cargar datos (soccer usa CSV, otros genera sample)
+    # ✅ Cargar SOLO datos reales (sin fallback)
+    df = load_real_data(data_path)
+    
+    # Filtrar por deporte si es necesario
     if sport == 'soccer':
-        df = load_data(data_path)
-    else:
-        df = generate_sample_data(sport)
+        soccer_leagues = ['Premier', 'LaLiga', 'Serie A', 'Bundesliga', 'Ligue 1', 'Liga MX']
+        df = df[df['league'].str.contains('|'.join(soccer_leagues), na=False)]
+    elif sport == 'nba':
+        df = df[df['league'].str.contains('NBA', na=False)]
+    elif sport == 'mlb':
+        df = df[df['league'].str.contains('MLB', na=False)]
     
-    print(f"🧹 Datos raw: {len(df)} filas")
+    if len(df) < 100:
+        raise ValueError(f"Datos insuficientes para {sport}: {len(df)} filas (mínimo 100)")
+    
+    print(f"✅ Filas filtradas para {sport}: {len(df)}")
     
     # Validación TimeSeries
     time_series_validation(df.copy(), sport)
@@ -336,18 +327,22 @@ def train_model(sport, data_path='data/match_history.csv', save_path='models'):
     # Entrenamiento final
     model = MultiSportEnsemble(sport).fit(df)
     
-    # Auto-guardado
+    # Guardar
     os.makedirs(save_path, exist_ok=True)
     model_path = f'{save_path}/{sport}_model.pkl'
     pickle.dump(model, open(model_path, 'wb'))
-    print(f"✅ {sport.upper()} modelo guardado: {model_path}")
+    print(f"✅ Modelo guardado: {model_path}")
     
     return model
 
-def train_all():
-    """Entrena todos los modelos (soccer, nba, mlb)."""
+def train_all(data_path=DATA_PATH):
+    """Entrena todos los modelos."""
     for sport in ['soccer', 'nba', 'mlb']:
-        train_model(sport)
+        try:
+            train_model(sport, data_path)
+        except Exception as e:
+            print(f"❌ Error en {sport}: {e}")
+            continue
 
 # ==========================================
 # EJECUCIÓN PRINCIPAL
@@ -355,8 +350,22 @@ def train_all():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🎯 EDGE BOT PRO v3.2 - ENTRENAMIENTO DE MODELOS")
+    print("🎯 EDGE BOT PRO v3.3 - ENTRENAMIENTO CON DATOS REALES")
     print("=" * 60)
-    train_all()
-    print("\n🎯 ¡Todos los modelos entrenados y guardados!")
-    print("   Ejecuta: python bot.py")
+    
+    try:
+        train_all()
+        print("\n✅ ¡Todos los modelos entrenados exitosamente!")
+    except FileNotFoundError as e:
+        print(f"\n❌ ERROR: {e}")
+        print("\n📋 INSTRUCCIONES:")
+        print("   1. Descarga datos históricos desde:")
+        print("      - FBRef API: https://fbref.com/")
+        print("      - Understat API: https://understat.com/")
+        print("      - Scraping ESPN/Sofascore")
+        print("   2. Guarda en data/match_history.csv con formato:")
+        print("      date,team,opponent,is_home,scored,conceded,target,league")
+    except Exception as e:
+        print(f"\n❌ ERROR INESPERADO: {e}")
+        import traceback
+        traceback.print_exc()
