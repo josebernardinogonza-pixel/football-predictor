@@ -1,0 +1,64 @@
+name: Edge Bot Pro - Production Auto-Run
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Every hour
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['training.py', 'bot.py', 'data/**']
+
+jobs:
+  train-and-predict:
+    runs-on: ubuntu-latest
+    
+    env:
+      TELEGRAM_BOT_TOKEN: ${ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${ secrets.TELEGRAM_CHAT_ID }}
+      ODDS_API_KEY: ${ secrets.ODDS_API_KEY }}
+      GITHUB_TOKEN: ${ secrets.GITHUB_TOKEN }}
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install PyGithub
+      
+      - name: Fetch Historical Data (if missing)
+        run: |
+          if [ ! -f "data/match_history.csv" ] || [ $(wc -l < data/match_history.csv) < 100 ]; then
+            python data/fetch_historical.py
+          fi
+      
+      - name: Train Models (Auto-Improvement)
+        run: |
+          python training.py
+      
+      - name: Commit Models & Logs
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add models/*.pkl data/performance_log.csv
+          git commit -m "Auto: Models & Performance Log [$(date)]" || echo "No changes"
+          git push
+        env:
+          GITHUB_TOKEN: ${ env.GITHUB_TOKEN }}
+      
+      - name: Run Bot (Predictions)
+        run: python bot.py
+      
+      - name: Upload Performance Logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-logs
+          path: data/performance_log.csv
+          retention-days: 30
