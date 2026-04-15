@@ -1,45 +1,35 @@
-name: Bot de Apuestas Real-Time
+name: Edge Bot Pro - Hourly Execution
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 16 * * *' # 10:00 AM CDMX
+    - cron: '0 * * * *'  # Cada hora
+  workflow_dispatch:
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
-      - name: Install Deps
-        run: pip install numpy scipy requests
-
-      - name: Run Cerebro
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Train models (if missing)
+        run: |
+          if [ ! -d "models" ] || [ -z "$(ls -A models)" ]; then
+            python training.py
+          fi
+      
+      - name: Run bot
         env:
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: python bot.py
-
-      - name: Sync Data
-        run: |
-          git config --global user.name "BotMaestro-AI"
-          git config --global user.email "maestro@quant.com"
-          git add .
-          git stash || echo "No changes"
-          git pull --rebase origin main
-          git stash pop || echo "No changes"
-          git add .
-          git commit -m "Update Real Data [skip ci]" || echo "No changes"
-          git push origin main
