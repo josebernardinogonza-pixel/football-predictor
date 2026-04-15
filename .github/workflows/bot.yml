@@ -2,11 +2,15 @@ name: Edge Bot Pro - Production Auto-Run
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Every hour
+    - cron: '0 * * * *'  # Ejecución cada hora
   workflow_dispatch:
   push:
     branches: [main]
     paths: ['training.py', 'bot.py', 'data/**']
+
+# PERMISOS: Necesarios para corregir el error 403 (Permiso denegado)
+permissions:
+  contents: write
 
 jobs:
   train-and-predict:
@@ -28,7 +32,7 @@ jobs:
         with:
           python-version: '3.11'
       
-      # Paso solicitado para crear carpetas faltantes
+      # Paso para asegurar que las carpetas existan antes de que corra el código
       - name: Crear carpetas de trabajo
         run: mkdir -p models data
       
@@ -39,31 +43,37 @@ jobs:
       
       - name: Fetch Historical Data (if missing)
         run: |
-          # Umbral cambiado de 100 a 15
+          # Umbral de 100 a 15
           if [ ! -f "data/match_history.csv" ] || [ $(wc -l < data/match_history.csv) -lt 15 ]; then
             python data/fetch_historical.py
           fi
       
       - name: Train Models (Auto-Improvement)
         run: |
+          # NOTA: Debes cambiar manualmente el umbral a 15 dentro de training.py 
+          # para que coincida con este workflow.
           python training.py
       
       - name: Commit Models & Logs
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          # Agregado condicional para que no de error si no hay .pkl todavía
+          
+          # Agregar archivos solo si existen para evitar errores fatales
           if ls models/*.pkl 1> /dev/null 2>&1; then git add models/*.pkl; fi
           if [ -f "data/performance_log.csv" ]; then git add data/performance_log.csv; fi
-          git commit -m "Auto: Models & Performance Log [$(date)]" || echo "No changes"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_GITHUB }}
+          if [ -f "data/match_history.csv" ]; then git add data/match_history.csv; fi
+          
+          git commit -m "Auto: Models & Logs [$(date)]" || echo "No changes to commit"
+          
+          # Autenticación explícita para evitar el error 403
+          git push https://x-access-token:${{ secrets.TOKEN_GITHUB }}@github.com/${{ github.repository }}.git
       
       - name: Run Bot (Predictions)
         run: python bot.py
       
       - name: Upload Performance Logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: performance-logs
