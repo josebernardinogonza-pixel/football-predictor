@@ -50,7 +50,7 @@ def load_real_data(filepath=DATA_PATH):
     """
     if not os.path.exists(filepath):
         print(f"⚠️ Archivo {filepath} no encontrado - Fetching desde ESPN API...")
-        df = fetch_espn historical_data()
+        df = fetch_espn_historical_data()
         if df is None or len(df) < 100:
             raise FileNotFoundError(
                 f"❌ ERROR CRÍTICO: No hay datos suficientes.\n"
