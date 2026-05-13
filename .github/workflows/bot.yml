@@ -8,66 +8,67 @@ on:
     branches: [main]
     paths: ['training.py', 'bot.py', 'data/**']
 
-# PERMISOS: Necesarios para corregir el error 403 (Permiso denegado)
 permissions:
   contents: write
 
 jobs:
   train-and-predict:
     runs-on: ubuntu-latest
-    
+
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-      TOKEN_GITHUB: ${{ secrets.TOKEN_GITHUB }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}      # Usa el token oficial de GitHub Actions para push
+      DATA_MIN_ROWS: 15                              # Para coincidir con el parámetro en training.py
     
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 1
-      
-      - name: Set up Python
+          fetch-depth: 0   # Full fetch para push
+   
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       
-      # Paso para asegurar que las carpetas existan antes de que corra el código
       - name: Crear carpetas de trabajo
         run: mkdir -p models data
-      
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install PyGithub
       
-      - name: Fetch Historical Data (if missing)
+      - name: Fetch Historical Data (if missing or insuficient)
         run: |
-          # Umbral de 100 a 15
-          if [ ! -f "data/match_history.csv" ] || [ $(wc -l < data/match_history.csv) -lt 15 ]; then
+          if [ ! -f "data/match_history.csv" ] || [ $(wc -l < data/match_history.csv) -lt $DATA_MIN_ROWS ]; then
             python data/fetch_historical.py
           fi
       
       - name: Train Models (Auto-Improvement)
         run: |
-          # NOTA: Debes cambiar manualmente el umbral a 15 dentro de training.py 
-          # para que coincida con este workflow.
           python training.py
       
       - name: Commit Models & Logs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # Agregar archivos solo si existen para evitar errores fatales
-          if ls models/*.pkl 1> /dev/null 2>&1; then git add models/*.pkl; fi
-          if [ -f "data/performance_log.csv" ]; then git add data/performance_log.csv; fi
-          if [ -f "data/match_history.csv" ]; then git add data/match_history.csv; fi
+          git add models/*.pkl 2>/dev/null || true
+          git add data/performance_log.csv 2>/dev/null || true
+          git add data/match_history.csv 2>/dev/null || true
           
-          git commit -m "Auto: Models & Logs [$(date)]" || echo "No changes to commit"
-          
-          # Autenticación explícita para evitar el error 403
-          git push https://x-access-token:${{ secrets.TOKEN_GITHUB }}@github.com/${{ github.repository }}.git
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto: Models & Logs [$(date '+%Y-%m-%d %H:%M:%S')]"
+            # Push usando token en remoto seguro con variable
+            git push origin HEAD:main
+          fi
       
       - name: Run Bot (Predictions)
         run: python bot.py
