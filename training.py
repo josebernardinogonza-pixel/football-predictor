@@ -1,84 +1,114 @@
-import pandas as pd
+"""
+EDGE BOT PRO - Training Script v1.0
+Genera modelos .pkl para soccer, NBA y MLB usando datos sintéticos
+"""
 import os
+import pickle
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 
-def load_real_data():
-    filepath = 'data/match_history.csv'  # Ajusta esta ruta si tu archivo está en otro lugar
+os.makedirs("models", exist_ok=True)
 
-    if not os.path.exists(filepath):
-        raise RuntimeError(f"Archivo no encontrado: {filepath}")
-
-    df_raw = pd.read_csv(filepath)
-
-    expected_raw_cols = {'Date', 'Home_Team', 'Away_Team', 'Home_Score', 'Away_Score', 'League'}
-    missing = expected_raw_cols - set(df_raw.columns)
-    if missing:
-        raise ValueError(f"Columnas faltantes en datos originales: {missing}")
-
-    df_raw['Date'] = pd.to_datetime(df_raw['Date'])
-
-    # Crear filas para equipos locales
-    home_df = pd.DataFrame({
-        'date': df_raw['Date'],
-        'team': df_raw['Home_Team'],
-        'opponent': df_raw['Away_Team'],
-        'is_home': True,
-        'scored': df_raw['Home_Score'],
-        'conceded': df_raw['Away_Score'],
-        'league': df_raw['League'],
-    })
-
-    # Crear filas para equipos visitantes
-    away_df = pd.DataFrame({
-        'date': df_raw['Date'],
-        'team': df_raw['Away_Team'],
-        'opponent': df_raw['Home_Team'],
-        'is_home': False,
-        'scored': df_raw['Away_Score'],
-        'conceded': df_raw['Home_Score'],
-        'league': df_raw['League'],
-    })
-
-    df = pd.concat([home_df, away_df], ignore_index=True)
-
-    # Crear columna target: 1 para victoria, 0 empate, -1 derrota
-    def get_target(row):
-        if row['scored'] > row['conceded']:
-            return 1
-        elif row['scored'] == row['conceded']:
-            return 0
-        else:
-            return -1
-
-    df['target'] = df.apply(get_target, axis=1)
-
-    expected_final_cols = {'is_home', 'team', 'date', 'conceded', 'opponent', 'target', 'scored', 'league'}
-    missing_final = expected_final_cols - set(df.columns)
-    if missing_final:
-        raise ValueError(f"Columnas faltantes tras transformación: {missing_final}")
-
+def generate_soccer_data(n=5000):
+    np.random.seed(42)
+    data = {
+        'scored_rolling_5': np.random.uniform(0.5, 2.5, n),
+        'conceded_rolling_5': np.random.uniform(0.3, 2.2, n),
+        'scored_rolling_10': np.random.uniform(0.6, 2.4, n),
+        'conceded_rolling_10': np.random.uniform(0.4, 2.1, n),
+        'opponent_scored_rolling_5': np.random.uniform(0.5, 2.3, n),
+        'opponent_conceded_rolling_5': np.random.uniform(0.4, 2.2, n),
+        'opponent_scored_rolling_10': np.random.uniform(0.5, 2.2, n),
+        'opponent_conceded_rolling_10': np.random.uniform(0.4, 2.0, n),
+        'home_advantage': np.random.uniform(0.05, 0.25, n),
+        'rest_days': np.random.uniform(1, 7, n),
+        'rest_diff': np.random.uniform(-2, 2, n),
+        'rest_advantage': np.random.uniform(-0.3, 0.3, n),
+        'strength_diff_5': np.random.uniform(-1, 1, n),
+        'strength_diff_10': np.random.uniform(-1, 1, n)
+    }
+    df = pd.DataFrame(data)
+    # Target sintético: local gana si cumple ciertas condiciones
+    prob = 0.3 + 0.2*df['scored_rolling_5'] - 0.15*df['conceded_rolling_5'] + 0.1*df['home_advantage']
+    prob = np.clip(prob, 0, 1)
+    df['target'] = (np.random.uniform(0,1,n) < prob).astype(int)
     return df
 
-def train_all():
-    print("🚀 Iniciando entrenamiento de modelos...")
-    try:
-        df = load_real_data()
-    except Exception as e:
-        print(f"❌ ERROR INESPERADO: Error procesando datos: {e}")
-        return None
+def generate_nba_data(n=5000):
+    np.random.seed(43)
+    data = {
+        'scored_rolling_5': np.random.uniform(95, 125, n),
+        'conceded_rolling_5': np.random.uniform(95, 125, n),
+        'scored_rolling_10': np.random.uniform(96, 124, n),
+        'conceded_rolling_10': np.random.uniform(96, 124, n),
+        'opponent_scored_rolling_5': np.random.uniform(95, 125, n),
+        'opponent_conceded_rolling_5': np.random.uniform(95, 125, n),
+        'opponent_scored_rolling_10': np.random.uniform(95, 124, n),
+        'opponent_conceded_rolling_10': np.random.uniform(95, 124, n),
+        'home_advantage': np.random.uniform(2, 8, n),
+        'rest_days': np.random.uniform(0, 4, n),
+        'rest_diff': np.random.uniform(-2, 2, n),
+        'rest_advantage': np.random.uniform(-3, 3, n),
+        'strength_diff_5': np.random.uniform(-10, 10, n),
+        'strength_diff_10': np.random.uniform(-10, 10, n)
+    }
+    df = pd.DataFrame(data)
+    prob = 0.35 + 0.005*(df['scored_rolling_5'] - 110) - 0.005*(df['conceded_rolling_5'] - 110) + 0.02*df['home_advantage']
+    prob = np.clip(prob, 0, 1)
+    df['target'] = (np.random.uniform(0,1,n) < prob).astype(int)
+    return df
 
-    print(f"Datos cargados correctamente, {len(df)} filas disponibles.")
-    
-    # Aquí puedes agregar la lógica de entrenamiento con tu dataframe df.
-    # Por ejemplo, preparar datos, entrenar modelos, evaluar, etc.
+def generate_mlb_data(n=5000):
+    np.random.seed(44)
+    data = {
+        'scored_rolling_5': np.random.uniform(2.5, 6.5, n),
+        'conceded_rolling_5': np.random.uniform(2.5, 6.5, n),
+        'scored_rolling_10': np.random.uniform(2.6, 6.4, n),
+        'conceded_rolling_10': np.random.uniform(2.6, 6.4, n),
+        'opponent_scored_rolling_5': np.random.uniform(2.5, 6.5, n),
+        'opponent_conceded_rolling_5': np.random.uniform(2.5, 6.5, n),
+        'opponent_scored_rolling_10': np.random.uniform(2.6, 6.4, n),
+        'opponent_conceded_rolling_10': np.random.uniform(2.6, 6.4, n),
+        'home_advantage': np.random.uniform(0.1, 0.6, n),
+        'rest_days': np.random.uniform(0, 3, n),
+        'rest_diff': np.random.uniform(-1, 1, n),
+        'rest_advantage': np.random.uniform(-0.3, 0.3, n),
+        'strength_diff_5': np.random.uniform(-2, 2, n),
+        'strength_diff_10': np.random.uniform(-2, 2, n)
+    }
+    df = pd.DataFrame(data)
+    prob = 0.4 + 0.1*(df['scored_rolling_5'] - 4.5) - 0.1*(df['conceded_rolling_5'] - 4.5) + 0.15*df['home_advantage']
+    prob = np.clip(prob, 0, 1)
+    df['target'] = (np.random.uniform(0,1,n) < prob).astype(int)
+    return df
 
-    # Resultado simulado para ejemplo
-    results = {"status": "ok", "rows": len(df)}
-    return results
+print("🔄 Generando datos sintéticos...")
+soccer_df = generate_soccer_data()
+nba_df = generate_nba_data()
+mlb_df = generate_mlb_data()
 
+feature_cols = ['scored_rolling_5', 'conceded_rolling_5', 'scored_rolling_10', 'conceded_rolling_10',
+                'opponent_scored_rolling_5', 'opponent_conceded_rolling_5', 'opponent_scored_rolling_10',
+                'opponent_conceded_rolling_10', 'home_advantage', 'rest_days', 'rest_diff',
+                'rest_advantage', 'strength_diff_5', 'strength_diff_10']
 
-if __name__ == '__main__':
-    results = train_all()
-    if results:
-        print("✅ Entrenamiento finalizado con éxito.")
-    else:
-        print("❌ El entrenamiento terminó con errores.")
+def train_and_save(df, sport_name):
+    X = df[feature_cols]
+    y = df['target']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = RandomForestClassifier(n_estimators=200, max_depth=12, random_state=42)
+    model.fit(X_train, y_train)
+    acc = model.score(X_test, y_test)
+    print(f"✅ {sport_name} modelo entrenado - Accuracy: {acc:.3f}")
+    path = f"models/{sport_name}_model.pkl"
+    with open(path, 'wb') as f:
+        pickle.dump(model, f)
+    print(f"   Guardado en {path}")
+
+train_and_save(soccer_df, "soccer")
+train_and_save(nba_df, "nba")
+train_and_save(mlb_df, "mlb")
+
+print("🎉 Todos los modelos listos. Ahora puedes ejecutar: python bot.py")
