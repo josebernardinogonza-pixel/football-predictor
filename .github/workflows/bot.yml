@@ -57,16 +57,20 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          
+
           git add models/*.pkl 2>/dev/null || true
           git add data/performance_log.csv 2>/dev/null || true
           git add data/match_history.csv 2>/dev/null || true
-          
+
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
             git commit -m "Auto: Models & Logs [$(date '+%Y-%m-%d %H:%M:%S')]"
-            # Push usando token en remoto seguro con variable
+            
+            # Hacer pull antes para evitar conflictos con cambios remotos
+            git pull --rebase origin main
+            
+            # Luego hacer push
             git push origin HEAD:main
           fi
       
