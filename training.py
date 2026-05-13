@@ -131,9 +131,6 @@ def fetch_espn_historical_data(sport='soccer', days_back=90):
     return df
 
 
-# Implementa aquí las funciones restantes para entrenamiento, features, modelos y validación igual que en tu código original.
-# Solo recuerda usar load_real_data() para cargar datos y manejar excepciones.
-
 def github_auto_commit(model_path, performance_log_path, token=GITHUB_TOKEN, repo_name=REPO_NAME):
     if not token:
         print("⚠️ GITHUB_TOKEN no configurado, no se realiza commit automático")
@@ -180,15 +177,64 @@ def github_auto_commit(model_path, performance_log_path, token=GITHUB_TOKEN, rep
         return False
 
 
+# ====== EJEMPLO BÁSICO: IMPLEMENTACIÓN DE LA FUNCIÓN train_all ======
+# Esta función deberías adaptarla a tus procesos de entrenamiento.
+def train_all():
+    print("🚀 Iniciando entrenamiento de modelos...")
+
+    df = load_real_data()
+
+    # Por ejemplo: preparar features simples
+    features = ['is_home', 'scored', 'conceded']
+    target = 'target'
+
+    X = df[features]
+    y = df[target]
+
+    tscv = TimeSeriesSplit(n_splits=5)
+    scores = []
+
+    for fold, (train_idx, test_idx) in enumerate(tscv.split(X)):
+        print(f"⏳ Fold {fold + 1} / 5")
+
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+        model = RandomForestClassifier(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+
+        preds = model.predict(X_test)
+        acc = accuracy_score(y_test, preds)
+        scores.append(acc)
+
+        print(f"    Accuracy fold {fold + 1}: {acc:.4f}")
+
+    avg_score = np.mean(scores)
+    print(f"\n✅ Accuracy promedio: {avg_score:.4f}")
+
+    # Guardar modelo ejemplo
+    if not os.path.exists(MODELS_PATH):
+        os.makedirs(MODELS_PATH)
+
+    model_file = os.path.join(MODELS_PATH, 'random_forest_model.pkl')
+    with open(model_file, 'wb') as f:
+        pickle.dump(model, f)
+    print(f"✅ Modelo guardado en {model_file}")
+
+    # Aquí podrías actualizar performance log si lo deseas
+    # Y ejecutar commit automático:
+    github_auto_commit(MODELS_PATH, PERFORMANCE_LOG)
+
+    return {'average_accuracy': avg_score}
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("🎯 EDGE BOT PRO v4.0 - PRODUCTION TRAINING")
     print("=" * 60)
 
     try:
-        # Aquí llamas a tu función train_all o equivalente que entrena todos los modelos
-        from training import train_all  # Asegúrate de que está definida
-
+        # Llama directamente a la función sin importaciones problemáticas
         results = train_all()
         print("\n✅ Todos los modelos entrenados exitosamente!")
         print(f"📊 Resultados: {results}")
@@ -200,5 +246,4 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"\n❌ ERROR INESPERADO: {e}")
         import traceback
-
         traceback.print_exc()
